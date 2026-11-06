@@ -18,7 +18,7 @@
 import { z } from "zod";
 
 import { autonomousPlanInputSchema } from "./autonomous.ts";
-import { COLUMNS, CROSS_BOARD_CLIENT_ID_PATTERN, CROSS_BOARD_DESCRIPTION_MAX_LENGTH, CROSS_BOARD_PROJECT_KEY_MAX_LENGTH, CROSS_BOARD_TITLE_MAX_LENGTH, DEFAULT_IMPLEMENTATION_LOT, LOT_LABEL_MAX_LENGTH, MAX_PARALLEL_IMPLEMENTERS, REVIEW_LEVELS, TRIAGE_VERDICTS } from "./constants.ts";
+import { COLUMNS, CROSS_BOARD_CLIENT_ID_PATTERN, CROSS_BOARD_DESCRIPTION_MAX_LENGTH, CROSS_BOARD_PROJECT_KEY_MAX_LENGTH, CROSS_BOARD_TITLE_MAX_LENGTH, DEFAULT_IMPLEMENTATION_LOT, LOT_LABEL_MAX_LENGTH, MAX_PARALLEL_IMPLEMENTERS, REVIEW_LEVELS, TRIAGE_VERDICTS, USER_DISMISSAL_KINDS, USER_REVIEW_VERDICTS } from "./constants.ts";
 import type { Stage } from "./constants.ts";
 import { implementationPlanLotDefinitionSchema, implementationPlanParallelSchema } from "./implementationPlan.ts";
 import { prdDocumentSchema } from "./prdDocument.ts";
@@ -153,10 +153,20 @@ const reviewReasonArgSchema = z.string().trim().min(1).max(REVIEW_REASON_MAX_LEN
 const prTitleArgSchema = z.string().trim().min(1);
 const prBodyArgSchema = z.string().trim().min(1);
 
+export const USER_DECISION_REASON_MAX_LENGTH = 500;
+export const USER_NOTE_MAX_LENGTH = 4_000;
+/** Id of the user comment (`comments.id`) whose explicit instruction authorises a backend action. */
+const userMessageIdArgSchema = z.string().trim().min(1);
+const userDecisionReasonArgSchema = z.string().trim().min(1).max(USER_DECISION_REASON_MAX_LENGTH);
+
 export const doneArgsSchema = z.object({
   pr_url: z.url(),
   review_level: reviewLevelArgSchema.optional(),
   review_reason: reviewReasonArgSchema.optional(),
+  skipPublication: z.object({
+    messageId: userMessageIdArgSchema,
+    reason: userDecisionReasonArgSchema,
+  }).optional(),
 });
 
 export const readyForReviewArgsSchema = z.object({
@@ -223,10 +233,18 @@ export const reviewKindSchema = z.enum([
 ]);
 export type ReviewKind = z.infer<typeof reviewKindSchema>;
 
-export const delegateReviewArgsSchema = z.object({
-  kind: reviewKindSchema,
-  context: z.string().min(1),
-});
+export const delegateReviewArgsSchema = z
+  .object({
+    kind: reviewKindSchema,
+    context: z.string().min(1),
+    rerun: z.boolean().optional(),
+    messageId: userMessageIdArgSchema.optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.rerun === true && value.messageId === undefined) {
+      context.addIssue({ code: "custom", message: "rerun exige le messageId de l'instruction de l'utilisateur", path: ["messageId"] });
+    }
+  });
 
 export const readReviewResultsArgsSchema = z.object({
   passId: z.string().min(1).nullish(),
@@ -237,9 +255,28 @@ export const grantReviewPassesArgsSchema = z.object({
   count: z.number().int().min(1).max(10),
 });
 
-export const publishReviewArgsSchema = z.object({
-  passId: z.string().min(1),
+export const userDismissalArgSchema = z.object({
+  findingIds: z.array(z.string().trim().min(1)).min(1),
+  reason: userDecisionReasonArgSchema,
+  kind: z.enum(USER_DISMISSAL_KINDS),
 });
+export type UserDismissalArg = z.infer<typeof userDismissalArgSchema>;
+
+export const publishReviewArgsSchema = z
+  .object({
+    passId: z.string().min(1),
+    messageId: userMessageIdArgSchema.optional(),
+    dismiss: z.array(userDismissalArgSchema).optional(),
+    note: z.string().trim().min(1).max(USER_NOTE_MAX_LENGTH).optional(),
+    verdict: z.enum(USER_REVIEW_VERDICTS).optional(),
+  })
+  .superRefine((value, context) => {
+    const decides = value.dismiss !== undefined || value.note !== undefined || value.verdict !== undefined;
+    if (decides && value.messageId === undefined) {
+      context.addIssue({ code: "custom", message: "dismiss, note et verdict exigent le messageId de l'instruction de l'utilisateur", path: ["messageId"] });
+    }
+  });
+export type PublishReviewArgs = z.infer<typeof publishReviewArgsSchema>;
 
 export const reviewFindingSeveritySchema = z.enum(["critical", "major", "minor"]);
 export const reviewFindingVerificationSchema = z.enum(["not_needed", "pending", "confirmed", "demoted", "rejected"]);
@@ -384,7 +421,7 @@ export const WORKER_TOOLS = [
   },
   {
     name: "done",
-    description: "Signale la fin du ticket avec l'URL de la PR draft (GitHub ou Azure DevOps selon le projet), le niveau de relecture humaine (review_level : low, medium ou high) et sa raison (review_reason). Niveau et raison sont obligatoires à la première livraison d'un ticket feature, facultatifs pour une correction ou une résolution de conflits. Le backend vérifie avant de clôturer.",
+    description: "Signale la fin du ticket avec l'URL de la PR draft (GitHub ou Azure DevOps selon le projet), le niveau de relecture humaine (review_level : low, medium ou high) et sa raison (review_reason). Niveau et raison sont obligatoires à la première livraison d'un ticket feature, facultatifs pour une correction ou une résolution de conflits. Le backend vérifie avant de clôturer. Ticket review uniquement : `skipPublication: { messageId, reason }` clôture une revue complète sans la publier, sur instruction explicite de l'utilisateur (messageId = id de son commentaire), tant qu'aucune publication n'a été tentée.",
     argsSchema: doneArgsSchema,
   },
   {
@@ -423,25 +460,25 @@ export const WORKER_TOOLS = [
   {
     name: "delegate_review",
     description:
-      "Lance un reviewer indépendant en lecture seule pour une dimension de review. Retourne immédiatement : termine le tour et attends review_done.",
+      "Lance un reviewer indépendant en lecture seule pour une dimension de review. Retourne immédiatement : termine le tour et attends review_done. Une dimension déjà rendue n'est pas relancée, sauf sur un ticket review avec `rerun: true` et le `messageId` de l'instruction explicite de l'utilisateur : le backend archive le résultat courant, relance cette seule dimension avec ton `context` sur le même head de PR, et restaure l'ancien résultat si la relance échoue.",
     argsSchema: delegateReviewArgsSchema,
   },
   {
     name: "read_review_results",
     description:
-      "Relit les verdicts de review déjà persistés pour la passe courante du ticket (ou la passe `passId` si fournie). À utiliser quand un événement review_done n'est pas arrivé, plutôt que de relancer les reviewers.",
+      "Relit les verdicts de review déjà persistés pour la passe courante du ticket (ou la passe `passId` si fournie). À utiliser quand un événement review_done n'est pas arrivé, plutôt que de relancer les reviewers. Liste aussi les identifiants qualifiés kind:id des findings publiables, leurs groupes de déduplication et les décisions de l'utilisateur déjà enregistrées.",
     argsSchema: readReviewResultsArgsSchema,
   },
   {
     name: "grant_review_passes",
     description:
-      "Applique des passes de review supplémentaires accordées explicitement par l'utilisateur dans sa réponse à une de tes questions ask_user (questionId). count = nombre N de passes accordées. Réservé aux tickets feature ; chaque question ne peut justifier qu'un seul octroi.",
+      "Applique des passes de review supplémentaires accordées explicitement par l'utilisateur dans sa réponse à une de tes questions ask_user (questionId). count = nombre N de passes accordées. Réservé aux tickets feature non autonomes ; chaque question ne peut justifier qu'un seul octroi.",
     argsSchema: grantReviewPassesArgsSchema,
   },
   {
     name: "publish_review",
     description:
-      "Publie via le backend les résultats persistés de la passe de review sur le commit exact vérifié : REQUEST_CHANGES si un finding critical ou major est retenu, COMMENT s'il ne reste que des minor, APPROVE si aucun finding n'est retenu. Le backend publie sur l'hôte de PR du projet (review GitHub, fils de commentaires + vote Azure DevOps). Réservé aux tickets review dont le postage est activé.",
+      "Publie via le backend les résultats persistés de la passe de review sur le commit exact vérifié : REQUEST_CHANGES si un finding critical ou major est retenu, COMMENT s'il ne reste que des minor, APPROVE si aucun finding n'est retenu. Le backend publie sur l'hôte de PR du projet (review GitHub, fils de commentaires + vote Azure DevOps). Réservé aux tickets review dont le postage est activé. Décisions explicites de l'utilisateur, avec le `messageId` de son commentaire : `dismiss` écarte exactement les findings listés (ids qualifiés `kind:id` lus dans read_review_results) avec un motif false_positive ou accepted_risk, `note` joint son texte au corps publié, `verdict` choisit comment ou approve. Le contenu publié est figé avant l'appel à l'hôte : un nouvel appel rejoue la même publication.",
     argsSchema: publishReviewArgsSchema,
   },
   {
@@ -566,7 +603,7 @@ export function isWorkerToolName(value: string): value is WorkerToolName {
 
 export const channelEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ticket"), payload: z.string() }),
-  z.object({ type: z.literal("answer"), questionId: z.string(), answer: z.string() }),
+  z.object({ type: z.literal("answer"), questionId: z.string(), answer: z.string(), messageId: z.string().nullable().default(null) }),
   z.object({ type: z.literal("prd_validated"), note: z.string().default("") }),
   z.object({
     type: z.literal("implementation_done"),
@@ -585,7 +622,7 @@ export const channelEventSchema = z.discriminatedUnion("type", [
     findings: z.array(reviewFindingSchema).default([]),
   }),
   z.object({ type: z.literal("nudge"), message: z.string() }),
-  z.object({ type: z.literal("user_comment"), body: z.string() }),
+  z.object({ type: z.literal("user_comment"), body: z.string(), messageId: z.string().nullable().default(null) }),
   z.object({ type: z.literal("chat"), content: z.string(), steer: z.boolean().optional() }),
 ]);
 export type ChannelEvent = z.infer<typeof channelEventSchema>;

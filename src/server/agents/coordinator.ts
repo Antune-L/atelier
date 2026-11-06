@@ -732,6 +732,12 @@ export class AgentCoordinator {
         this.persistReviewAssessment(ctx.ticketId, assessment, { replace: false });
       }
     }
+    const { skipPublication } = parsed.data;
+    if (skipPublication !== undefined) {
+      if (!ticket || ticket.kind !== "review") return { ok: false, result: "skipPublication est réservé aux tickets review." };
+      const recorded = await this.delegation.recordSkipPublication(ticket, ctx.slotId, skipPublication.messageId, skipPublication.reason, ctx.callId);
+      if (!recorded.ok) return recorded;
+    }
     return this.completeReviewedTicket(ctx, parsed.data.pr_url);
   }
 
@@ -1048,7 +1054,8 @@ export class AgentCoordinator {
     if (!ticket || ticket.kind === "ask") {
       return { ok: false, result: "delegate_review indisponible pour cette session." };
     }
-    return this.delegation.startReview(ticket, ctx.slotId, parsed.data.kind, parsed.data.context);
+    const rerunMessageId = parsed.data.rerun === true ? parsed.data.messageId ?? null : null;
+    return this.delegation.startReview(ticket, ctx.slotId, parsed.data.kind, parsed.data.context, rerunMessageId);
   }
 
   private handleReadReviewResults(ctx: SessionToolCall): ToolResult {
@@ -1095,6 +1102,12 @@ export class AgentCoordinator {
     const parsed = grantReviewPassesArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const ticket = this.store.getTicket(ctx.ticketId);
+    if (ticket?.autonomous) {
+      return { ok: false, result: "grant_review_passes est indisponible sur un ticket autonome : son budget de review est fixé par le backend." };
+    }
+    if (ticket?.kind === "review") {
+      return { ok: false, result: "grant_review_passes ne s'applique pas aux tickets review. Pour relancer une dimension sur instruction explicite de l'utilisateur, appelle delegate_review({ kind, context, rerun: true, messageId }) avec l'id de son message." };
+    }
     if (ticket?.kind !== "feature") {
       return { ok: false, result: "grant_review_passes est réservé aux tickets feature." };
     }
@@ -1123,7 +1136,7 @@ export class AgentCoordinator {
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const ticket = this.store.getTicket(ctx.ticketId);
     if (!ticket) return { ok: false, result: "publish_review indisponible pour cette session." };
-    return this.delegation.publishReview(ticket, ctx.slotId, parsed.data.passId, ctx.callId);
+    return this.delegation.publishReview(ticket, ctx.slotId, parsed.data, ctx.callId);
   }
 
   private async handleFail(ctx: SessionToolCall): Promise<ToolResult> {
@@ -1228,9 +1241,9 @@ export class AgentCoordinator {
   }
 
   /** User answered a question (comment with questionId). Forward as channel event. */
-  answerQuestion(ticketId: string, questionId: string, answer: string): void {
-    this.store.markQuestionAnswered(questionId);
-    this.sessionHub.sendEvent(ticketId, { type: "answer", questionId, answer });
+  answerQuestion(ticketId: string, questionId: string, answer: string, messageId: string): void {
+    this.store.markQuestionAnswered(ticketId, questionId);
+    this.sessionHub.sendEvent(ticketId, { type: "answer", questionId, answer, messageId });
     const ticket = this.store.getTicket(ticketId);
     if (ticket && ticket.pendingQuestions === 0 && ticket.stage === "awaiting_answers") {
       this.lifecycle.resumeImplementing(ticketId);
@@ -1311,8 +1324,8 @@ export class AgentCoordinator {
   }
 
   /** Free-form user comment (no questionId) → steer the live session. Not agent progress. */
-  forwardComment(ticketId: string, body: string): void {
-    const delivered = this.sessionHub.sendEvent(ticketId, { type: "user_comment", body });
+  forwardComment(ticketId: string, body: string, messageId: string): void {
+    const delivered = this.sessionHub.sendEvent(ticketId, { type: "user_comment", body, messageId });
     if (delivered) this.store.logEvent(ticketId, "user_comment_queued", {});
   }
 

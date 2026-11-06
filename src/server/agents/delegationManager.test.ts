@@ -628,7 +628,7 @@ describe("DelegationManager — independent reviews", () => {
     expect(refused.result).toContain("Budget de passes de review épuisé");
 
     store.addComment(ticket.id, "agent", "Puis-je relancer des passes de review ?", "q-budget");
-    store.markQuestionAnswered("q-budget");
+    store.markQuestionAnswered(ticket.id, "q-budget");
     const grant = store.grantReviewPasses(ticket.id, "q-budget", 2);
     expect(grant?.rounds).toBe(allowedReviewPasses(ticket) - 2);
     expect(store.getTicket(ticket.id)?.reviewRounds).toBe(allowedReviewPasses(ticket) - 2);
@@ -917,7 +917,7 @@ describe("DelegationManager — review report and publication", () => {
     });
 
     const report = delegation.reviewReport(ticket.id);
-    expect(report).toContain("**Review complete — changes recommended**");
+    expect(report).toContain("**Review complete — comments**");
     expect(report).toContain("1 finding(s) kept: 1 minor.");
     expect(report).not.toContain("retenu");
   });
@@ -939,7 +939,7 @@ describe("DelegationManager — review report and publication", () => {
     });
 
     const report = delegation.reviewBoardReport(ticket.id);
-    expect(report).toContain("**Revue terminée — modifications recommandées**");
+    expect(report).toContain("**Revue terminée — commentaires**");
     expect(report).toContain("1 finding(s) retenu(s) : 1 minor.");
     expect(report).toContain("## Findings hors du diff");
     expect(report).not.toContain("Review complete");
@@ -968,6 +968,7 @@ describe("DelegationManager — review report and publication", () => {
       ticketId: ticket.id,
       passId,
       kind: "security",
+      revision: "security-attempt",
       status: "completed",
       verdict: "revise",
       summary: "One extra dimension nobody asked for",
@@ -982,7 +983,7 @@ describe("DelegationManager — review report and publication", () => {
       error: null,
     });
 
-    const published = await delegation.publishReview(ticket, 3, passId, "corr-extra");
+    const published = await delegation.publishReview(ticket, 3, { passId }, "corr-extra");
 
     expect(published.ok).toBe(true);
     expect(system.publishedReviews.at(-1)?.event).toBe("COMMENT");
@@ -1043,7 +1044,7 @@ describe("DelegationManager — review report and publication", () => {
     const passId = store.getReviewPass(ticket.id)?.passId;
     if (passId === undefined) throw new Error("review pass missing");
 
-    const published = await delegation.publishReview(ticket, 3, passId, "corr-1");
+    const published = await delegation.publishReview(ticket, 3, { passId }, "corr-1");
 
     expect(published.ok).toBe(true);
     expect(published.result).toContain("1 finding(s) auto-réfuté(s) ignoré(s)");
@@ -1089,7 +1090,7 @@ describe("DelegationManager — review report and publication", () => {
 
     const passId = store.getReviewPass(ticket.id)?.passId;
     if (passId === undefined) throw new Error("review pass missing");
-    const published = await delegation.publishReview(ticket, 3, passId, "corr-2");
+    const published = await delegation.publishReview(ticket, 3, { passId }, "corr-2");
 
     expect(published.ok).toBe(true);
     expect(published.result).not.toContain("auto-réfuté");
@@ -1104,11 +1105,142 @@ describe("DelegationManager — review report and publication", () => {
     await startAndApproveReviews(delegation, system, ticket, LIGHT_REVIEW_KINDS);
     const passId = store.getReviewPass(ticket.id)?.passId;
     if (passId === undefined) throw new Error("review pass missing");
-    const published = await delegation.publishReview(ticket, 3, passId, "corr-3");
+    const published = await delegation.publishReview(ticket, 3, { passId }, "corr-3");
 
     expect(published.ok).toBe(true);
     expect(system.publishedReviews[0]?.event).toBe("APPROVE");
     expect(system.publishedReviews[0]?.body).toContain("**Review complete — no changes recommended**");
     expect(system.publishedReviews[0]?.body).toContain("0 finding(s) kept: no findings.");
+  });
+});
+
+describe("DelegationManager — user decisions on a review ticket", () => {
+  function storedReviewTicket(): Ticket {
+    return store.createReview({
+      title: "Revue de PR",
+      description: "Relire la PR 42",
+      project: FIXTURE_PROJECT_KEY,
+      prNumber: 42,
+      prHeadBranch: "feat/review",
+      prUrl: "https://github.com/example/repo/pull/42",
+      reviewDepth: "light",
+      postComments: true,
+      fixComments: false,
+      reviewLanguage: "en",
+      humanTone: false,
+      model: null,
+      effort: null,
+      orchestrator: "codex",
+      codexModel: "gpt-6-sol",
+      codexEffort: "high",
+    });
+  }
+
+  async function settleReviewer(system: RecordingSystemAdapter, result: unknown): Promise<void> {
+    const reviewer = system.sessions.at(-1);
+    if (!reviewer) throw new Error("reviewer session missing");
+    if (result !== null) await reviewer.opts.onToolCall("submit_review", result);
+    reviewer.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "reviewer", usageByModel: {} });
+    await sleep(SETTLE_WAIT_MS);
+  }
+
+  async function completePass(delegation: DelegationManager, system: RecordingSystemAdapter, ticket: Ticket): Promise<string> {
+    for (const kind of LIGHT_REVIEW_KINDS) {
+      expect((await delegation.startReview(ticket, 3, kind, `diff ${kind}`)).ok).toBe(true);
+      const minor = kind === "conventions";
+      await settleReviewer(system, {
+        verdict: minor ? "revise" : "approve",
+        summary: minor ? "One naming issue" : "Nothing to report",
+        findings: minor ? [{ ...reviewFinding("minor", "conv-1"), summary: "Rename the helper", line: 61 }] : [],
+      });
+    }
+    const passId = store.getReviewPass(ticket.id)?.passId;
+    if (passId === undefined) throw new Error("review pass missing");
+    return passId;
+  }
+
+  test("a rerun needs a user message, archives the result and restores it with its revision on failure", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = storedReviewTicket();
+    startParentSession(sessionHub, ticket.id);
+    await completePass(delegation, system, ticket);
+    const before = store.getReviewPass(ticket.id)?.results.conventions;
+    if (!before) throw new Error("conventions result missing");
+
+    const unknown = await delegation.startReview(ticket, 3, "conventions", "main code", "missing-message");
+    expect(unknown.ok).toBe(false);
+    expect(unknown.result).toContain("introuvable");
+
+    const instruction = store.addComment(ticket.id, "user", "Relance conventions avec le code de main", null);
+    const sessionsBefore = system.sessions.length;
+    const rerun = await delegation.startReview(ticket, 3, "conventions", "main code pasted", instruction.id);
+    expect(rerun.ok).toBe(true);
+    expect(system.sessions).toHaveLength(sessionsBefore + 1);
+    expect(system.sessions.at(-1)?.sent[0]).toContain("main code pasted");
+    const pending = store.getReviewPass(ticket.id)?.results.conventions;
+    expect(pending?.status).toBe("pending");
+    expect(pending?.archived).toBe(true);
+
+    await settleReviewer(system, null);
+    const restored = store.getReviewPass(ticket.id)?.results.conventions;
+    expect(restored?.status).toBe("completed");
+    expect(restored?.revision).toBe(before.revision);
+    expect(restored?.createdAt).toBe(before.createdAt);
+
+    const replay = await delegation.startReview(ticket, 3, "conventions", "main code pasted", instruction.id);
+    expect(replay.ok).toBe(false);
+    expect(replay.result).toContain("déjà autorisé");
+  });
+
+  test("dismissing a finding with a user message comments by default and freezes the publication", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = storedReviewTicket();
+    startParentSession(sessionHub, ticket.id);
+    const passId = await completePass(delegation, system, ticket);
+    const instruction = store.addComment(ticket.id, "user", "conv-1 est un faux positif, publie quand même", null);
+
+    const results = delegation.readReviewResults(ticket.id, null);
+    expect(results.result).toContain("conventions:conv-1");
+
+    const published = await delegation.publishReview(ticket, 3, {
+      passId,
+      messageId: instruction.id,
+      dismiss: [{ findingIds: ["conventions:conv-1"], reason: "The helper name follows the module convention", kind: "false_positive" }],
+    }, "corr-dismiss");
+
+    expect(published.ok).toBe(true);
+    const posted = system.publishedReviews.at(-1);
+    expect(posted?.event).toBe("COMMENT");
+    expect(posted?.comments).toHaveLength(0);
+    expect(posted?.body).toContain("**Review complete — comments**");
+    expect(posted?.body).toContain("dismissed by the user: false positive — The helper name follows the module convention");
+    const pass = store.getReviewPass(ticket.id);
+    expect(pass?.publicationIntent?.dismissedFindingIds).toEqual(["conventions:conv-1"]);
+    expect(reviewPublicationState(pass ?? null)).toBe("COMMENTED");
+
+    const other = store.addComment(ticket.id, "user", "Finalement approuve", null);
+    const late = await delegation.publishReview(ticket, 3, { passId, messageId: other.id, verdict: "approve" }, "corr-late");
+    expect(late.ok).toBe(false);
+    expect(late.result).toContain("figé");
+    const skip = await delegation.recordSkipPublication(ticket, 3, other.id, "Pas de publication", "corr-skip");
+    expect(skip.ok).toBe(false);
+  });
+
+  test("closing without publication is recorded once and then blocks publication", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = storedReviewTicket();
+    startParentSession(sessionHub, ticket.id);
+    const passId = await completePass(delegation, system, ticket);
+    const instruction = store.addComment(ticket.id, "user", "Ne publie rien, je m'en occupe", null);
+
+    const skip = await delegation.recordSkipPublication(ticket, 3, instruction.id, "The user reviews it himself", "corr-skip");
+    expect(skip.ok).toBe(true);
+    expect((await delegation.recordSkipPublication(ticket, 3, instruction.id, "The user reviews it himself", "corr-skip-2")).ok).toBe(true);
+    expect(store.getReviewPass(ticket.id)?.decisions.skipPublication?.messageId).toBe(instruction.id);
+
+    const published = await delegation.publishReview(ticket, 3, { passId }, "corr-publish");
+    expect(published.ok).toBe(false);
+    expect(system.publishedReviews).toHaveLength(0);
+    expect(delegation.reviewBoardReport(ticket.id)).toContain("Revue clôturée sans publication (décision de l'utilisateur) : The user reviews it himself");
   });
 });

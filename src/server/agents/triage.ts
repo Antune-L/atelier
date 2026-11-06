@@ -153,14 +153,15 @@ export function fencedDataNotice(en: boolean): string {
 }
 
 /** The useful comments section plus its interpretation rule; empty when no comment is useful. */
-export function buildCommentsLines(comments: Comment[], opts: { en: boolean }): string[] {
+export function buildCommentsLines(comments: Comment[], opts: { en: boolean; messageIds?: boolean }): string[] {
   const { en } = opts;
   const useful = usefulComments(comments);
   if (useful.length === 0) return [];
   const lines = [en ? "Comments:" : "Commentaires :"];
   const userLabel = en ? "user" : "utilisateur";
   for (const comment of useful) {
-    const author = comment.author === "user" ? userLabel : "agent (question)";
+    const userAuthor = opts.messageIds === true ? `${userLabel} (messageId ${comment.id})` : userLabel;
+    const author = comment.author === "user" ? userAuthor : "agent (question)";
     lines.push(`- ${new Date(comment.createdAt).toISOString()} — ${author}${en ? ":" : " :"}`, fenceContent(comment.body));
   }
   lines.push(

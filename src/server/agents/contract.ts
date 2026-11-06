@@ -1,5 +1,5 @@
 import { CLEANER_BRANCH_SUFFIX, COMMIT_LANGUAGE_LABELS, DEFAULT_PLAN_PARALLEL_IMPLEMENTERS, FEASIBILITY_SCOUT_AGENT_NAME, FEASIBILITY_VERIFIER_AGENT_NAME, MAX_PARALLEL_IMPLEMENTERS, REVIEWER_BRANCH_SUFFIX } from "../../shared/constants.ts";
-import type { CommitLanguage, Orchestrator, ReviewDepth } from "../../shared/constants.ts";
+import type { CommitLanguage, Orchestrator, ReviewDepth, VcsProvider } from "../../shared/constants.ts";
 import type { QualityEvidence, QualityIteration } from "../../shared/quality.ts";
 import type { Comment, Ticket } from "../../shared/schemas.ts";
 import { findAuditMarker } from "../../shared/audit.ts";
@@ -326,7 +326,7 @@ export function buildTicketContract(
   const baseBranch = opts.baseBranch;
   const figmaUrls = extractFigmaUrls(ticket.description);
   const isUi = figmaUrls.length > 0;
-  const commentLines = buildCommentsLines(opts.comments ?? [], { en: false });
+  const commentLines = buildCommentsLines(opts.comments ?? [], { en: false, messageIds: true });
   // A stealth ticket runs the full pipeline but opens NO PR: it commits + pushes the branch and
   // signals readiness via ready_for_review() so the user can test locally before any PR is created.
   const stealth = ticket.stealth;
@@ -713,7 +713,36 @@ function buildReviewPublicationStep(ticket: Ticket, vcs: VcsCommandTable): strin
   if (!ticket.postComments) {
     return `3. N'en poste RIEN sur ${vcs.label} : synthétise le verdict (findings par sévérité) dans ta réponse.`;
   }
-  return `3. Appelle \`publish_review({ passId })\` avec le passId commun reçu dans les événements. Le backend compose et publie une seule review ${vcs.label} liée au commit revu : REQUEST_CHANGES si un finding critical ou major est retenu, COMMENT s'il ne reste que des findings minor, APPROVE si tous les findings ont été rejetés (ou auto-réfutés) ou si tous les reviewers approuvent. Ne poste aucun commentaire ${vcs.label} directement. Si la PR a avancé, lance une nouvelle passe complète avec tous les reviewers avant de rappeler publish_review.`;
+  return `3. Appelle \`publish_review({ passId })\` avec le passId commun reçu dans les événements. Le backend compose et publie une seule review ${vcs.label} liée au commit revu : REQUEST_CHANGES si un finding critical ou major est retenu, COMMENT s'il ne reste que des findings minor, APPROVE si tous les findings ont été rejetés (ou auto-réfutés) ou si tous les reviewers approuvent, après application des décisions explicites de l'utilisateur décrites plus haut. Ne poste aucun commentaire ${vcs.label} directement. Si la PR a avancé, lance une nouvelle passe complète avec tous les reviewers avant de rappeler publish_review.`;
+}
+
+/**
+ * How a read-only review session turns a user answer or comment into action: ordinary instructions
+ * are applied directly, decisions that change a backend constraint go through a typed action citing
+ * the user's message id. Only actions the tools can execute are offered.
+ */
+function buildReviewUserDecisionLines(ticket: Ticket, provider: VcsProvider): string[] {
+  const publicationDecisions = ticket.postComments
+    ? [
+        "- Écarter des findings avant publication (faux positif ou risque accepté) : `publish_review({ passId, messageId, dismiss: [{ findingIds, reason, kind: \"false_positive\" | \"accepted_risk\" }] })`, avec les identifiants qualifiés `kind:id` lus dans `read_review_results`. Seuls les findings sources listés sont écartés, jamais tout leur groupe de déduplication.",
+        "- Joindre une note de l'utilisateur à la publication : `note` ; choisir le verdict : `verdict: \"comment\" | \"approve\"` (après un écartement, il ne reste par défaut qu'un commentaire ; `approve` exige qu'aucun finding ne reste publié).",
+        "- Clôturer sans publier une revue complète : `done(pr_url, skipPublication: { messageId, reason })`, uniquement si aucune publication n'a été tentée.",
+        "- La publication est figée dès le premier appel de `publish_review` : plus aucune décision, relance ni clôture sans publication n'est ensuite possible, et un nouvel appel rejoue le même contenu.",
+      ]
+    : [];
+  const azureVotes = provider === "azureDevops"
+    ? ["- Sur Azure DevOps, une publication COMMENT et une publication REQUEST_CHANGES émettent le même vote (approuvé avec suggestions) : ne présente pas ces deux options comme des votes différents."]
+    : [];
+  return [
+    "## Instructions et décisions de l'utilisateur",
+    "Chaque réponse (`answer`) ou commentaire (`user_comment`) de l'utilisateur porte un `messageId`. Distingue deux cas :",
+    "- Une instruction de travail ordinaire (approfondir un point, reformuler, vérifier un fichier) : applique-la directement, sans action backend.",
+    "- Une décision qui change une contrainte du backend : exécute l'action typée correspondante en citant ce `messageId`. Le backend n'accepte qu'un message de l'utilisateur postérieur au résultat visé, une seule fois par action et par cible.",
+    "- Relancer une dimension déjà rendue avec un nouveau contexte : `delegate_review({ kind, context, rerun: true, messageId })`. Les reviewers n'ont que Read, Glob et Grep sur le worktree de la PR : colle dans `context` le code de la branche de base (ou tout extrait) dont ils ont besoin. Une relance est refusée si la PR a avancé ; lance alors une nouvelle passe complète sans `rerun`.",
+    ...publicationDecisions,
+    ...azureVotes,
+    "- Ne propose à l'utilisateur que des options que ces outils peuvent exécuter. Si une instruction ne peut pas être exécutée (action refusée ou hors catalogue), dis-le explicitement avec la raison au lieu de reposer la même question.",
+  ];
 }
 
 /**
@@ -778,6 +807,8 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
     "## Événements de channel",
     "Tu peux recevoir à tout moment un événement `user_comment` : une instruction/orientation de l'utilisateur à prendre en compte dans la revue en cours.",
     "",
+    ...buildReviewUserDecisionLines(ticket, project.vcsProvider),
+    "",
     "## Étapes",
     '1. `update_stage("reviewing")`.',
     "   Préparation bornée : lis une seule fois les sections utiles des skills/instructions. Dès que le diff, le head et le contexte sont collectés, lance les reviewers ; laisse chaque reviewer approfondir sa dimension au lieu de relire toutes les références dans l'orchestrateur.",
@@ -788,7 +819,7 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
     "## Interdits",
     "- Ne modifie AUCUN fichier : la revue est en lecture seule, cette session ne produit pas de diff.",
     "- Ne lance aucun typecheck (`tsc`, script typecheck ou équivalent) : une review analyse le diff et les types sans payer ce coût d'exécution.",
-    `- N'appelle aucune commande ${vcs.label} qui modifie la PR ; la publication COMMENT appartient exclusivement au backend via publish_review.`,
+    `- N'appelle aucune commande ${vcs.label} qui modifie la PR ; toute publication (commentaires, verdict et vote) appartient exclusivement au backend via publish_review.`,
     "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
     "- Ne touche à aucun fichier hors du worktree.",
     "- Lis les fichiers `AGENTS.md` applicables avant d'agir. Si une règle projet nécessaire n'y figure pas, consulte aussi le `CLAUDE.md` applicable comme source de compatibilité ; n'importe aucune permission ni secret depuis les réglages Claude.",

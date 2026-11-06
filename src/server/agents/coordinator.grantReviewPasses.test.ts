@@ -131,7 +131,7 @@ function startSession(ticketId: string): AgentSessionOptions["onToolCall"] {
 
 function askAnswered(ticketId: string, questionId: string): void {
   store.addComment(ticketId, "agent", "Puis-je relancer des passes de review ?", questionId);
-  store.markQuestionAnswered(questionId);
+  store.markQuestionAnswered(ticketId, questionId);
 }
 
 describe("grant_review_passes", () => {

@@ -229,13 +229,18 @@ function renderImplementationDone(event: Extract<ChannelEvent, { type: "implemen
 /** Frames a chat message sent while the agent is running a turn. */
 export const STEER_PREFIX = "Aiguillage de l'utilisateur pendant ton tour (réoriente le travail en cours sans repartir de zéro) : ";
 
+/** The user comment id an agent cites (`messageId`) when a backend action executes this instruction. */
+function userMessageReference(messageId: string | null): string {
+  return messageId === null ? "" : `, messageId ${messageId}`;
+}
+
 /** Render a backend channel event as the user-turn text injected into the live session. */
 export function renderChannelEvent(event: ChannelEvent): string {
   switch (event.type) {
     case "ticket":
       return event.payload;
     case "answer":
-      return `Réponse de l'utilisateur (question ${event.questionId}) : ${event.answer}`;
+      return `Réponse de l'utilisateur (question ${event.questionId}${userMessageReference(event.messageId)}) : ${event.answer}`;
     case "prd_validated":
       return `PRD validé par l'utilisateur. ${event.note}`;
     case "implementation_done":
@@ -249,7 +254,7 @@ export function renderChannelEvent(event: ChannelEvent): string {
     case "nudge":
       return event.message;
     case "user_comment":
-      return `Commentaire de l'utilisateur (à prendre en compte dans le travail en cours) : ${event.body}`;
+      return `Commentaire de l'utilisateur (à prendre en compte dans le travail en cours${userMessageReference(event.messageId)}) : ${event.body}`;
     case "chat":
       return event.steer ? `${STEER_PREFIX}${event.content}` : event.content;
   }

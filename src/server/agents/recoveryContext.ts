@@ -4,6 +4,9 @@ import { reviewKindSchema } from "../../shared/protocol.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import type { Store } from "../db/store.ts";
 
+import { qualifiedFindingId } from "./reviewFindings.ts";
+import { effectiveReviewResult } from "./reviewPass.ts";
+
 const MAX_RECOVERY_CONTEXT_LENGTH = 24_000;
 const MAX_RECOVERY_ENTRY_LENGTH = 1_200;
 const MAX_RECOVERY_ENTRIES = 20;
@@ -39,7 +42,7 @@ export function buildRecoveryContext(ticket: Ticket, store: Store, stage: Stage,
     lines.push("Les commentaires utilisateur figurent dans le contrat.");
   } else {
     for (const comment of store.listComments(ticket.id).filter((entry) => entry.author === "user" || entry.questionId !== null).slice(-MAX_RECOVERY_ENTRIES)) {
-      append("Contexte utilisateur", { author: comment.author, questionId: comment.questionId, answered: comment.answered, body: comment.body });
+      append("Contexte utilisateur", { author: comment.author, ...(comment.author === "user" ? { messageId: comment.id } : {}), questionId: comment.questionId, answered: comment.answered, body: comment.body });
     }
   }
   const plan = store.getImplementationPlan(ticket.id);
@@ -63,12 +66,23 @@ export function buildRecoveryContext(ticket: Ticket, store: Store, stage: Stage,
   const pass = store.getReviewPass(ticket.id);
   if (pass !== null) {
     append("Passe de review historique", { id: pass.passId, codeFingerprint: pass.codeFingerprint, depth: pass.reviewDepth });
+    const dismissed = new Map((effectiveReviewResult(pass)?.dismissed ?? []).map((entry) => [entry.id, entry.dismissal]));
     for (const kind of reviewKindSchema.options) {
       const result = pass.results[kind];
       if (!result) continue;
       append("Résultat de review historique", { kind, status: result.status, verdict: result.verdict, summary: result.summary, error: result.error });
-      for (const finding of result.findings.slice(0, MAX_RECOVERY_ENTRIES)) append("Correction à vérifier", { kind, id: finding.id, severity: finding.severity, summary: finding.summary, path: finding.path, line: finding.line, verificationStatus: finding.verificationStatus });
+      for (const finding of result.findings.slice(0, MAX_RECOVERY_ENTRIES)) {
+        const id = qualifiedFindingId({ kind, finding });
+        const dismissal = dismissed.get(id);
+        const entry = { id, severity: finding.severity, summary: finding.summary, path: finding.path, line: finding.line, verificationStatus: finding.verificationStatus };
+        if (dismissal === undefined) append("Correction à vérifier", entry);
+        else append("Finding écarté par l'utilisateur", { ...entry, category: dismissal.category, reason: dismissal.reason, messageId: dismissal.messageId });
+      }
     }
+    if (pass.decisions.note !== null) append("Note de l'utilisateur pour la publication", pass.decisions.note);
+    if (pass.decisions.verdict !== null) append("Verdict choisi par l'utilisateur", pass.decisions.verdict);
+    if (pass.decisions.skipPublication !== null) append("Clôture sans publication décidée", pass.decisions.skipPublication);
+    if (pass.publicationIntent !== null) append("Publication figée", { event: pass.publicationIntent.event, confirmed: pass.publishedReviewId !== null, startedAt: pass.publicationIntent.startedAt });
   }
   const iteration = store.getActiveQualityIteration(ticket.id);
   if (iteration !== null) append("Itération qualité", { id: iteration.id, mode: iteration.mode, status: iteration.status, diagnostic: iteration.diagnostic });

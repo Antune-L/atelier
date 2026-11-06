@@ -134,7 +134,7 @@ describe("SessionHub generations", () => {
     const session = system.sessions[0];
     if (!session) throw new Error("session missing");
 
-    expect(hub.sendEvent("ticket-1", { type: "user_comment", body: "Prends aussi ce cas en compte" })).toBe(true);
+    expect(hub.sendEvent("ticket-1", { type: "user_comment", body: "Prends aussi ce cas en compte", messageId: null })).toBe(true);
     const messageId = session.messageIds[0];
     if (!messageId) throw new Error("message id missing");
     expect(queued[0]).toMatchObject({ messageId, generation: 1, channel: "user_comment" });

@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   review_reason TEXT,
   review_flags_json TEXT,
   stealth_pr_title TEXT,
+  review_outcome TEXT,
   stealth_pr_body TEXT,
   column_name TEXT NOT NULL DEFAULT 'todo',
   stage TEXT,
@@ -302,6 +303,8 @@ CREATE TABLE IF NOT EXISTS review_passes (
   published_review_id INTEGER,
   published_commit_sha TEXT,
   published_at INTEGER,
+  decisions_json TEXT,
+  publication_json TEXT,
   created_at INTEGER NOT NULL
 );
 
@@ -316,6 +319,8 @@ CREATE TABLE IF NOT EXISTS review_approvals (
   status TEXT NOT NULL DEFAULT 'completed',
   verification_status TEXT NOT NULL DEFAULT 'not_needed',
   error TEXT,
+  revision TEXT,
+  previous_json TEXT,
   created_at INTEGER NOT NULL,
   PRIMARY KEY (ticket_id, pass_id, kind),
   FOREIGN KEY (ticket_id) REFERENCES review_passes(ticket_id)
@@ -652,6 +657,7 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "scheduled_start_missed_at", ddl: "ALTER TABLE tickets ADD COLUMN scheduled_start_missed_at INTEGER" },
   { column: "origin", ddl: "ALTER TABLE tickets ADD COLUMN origin TEXT" },
   { column: "remote_approved_at", ddl: "ALTER TABLE tickets ADD COLUMN remote_approved_at INTEGER" },
+  { column: "review_outcome", ddl: "ALTER TABLE tickets ADD COLUMN review_outcome TEXT" },
 ];
 
 /**
@@ -687,6 +693,8 @@ const REVIEW_RESULT_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "status", ddl: "ALTER TABLE review_approvals ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'" },
   { column: "verification_status", ddl: "ALTER TABLE review_approvals ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'not_needed'" },
   { column: "error", ddl: "ALTER TABLE review_approvals ADD COLUMN error TEXT" },
+  { column: "revision", ddl: "ALTER TABLE review_approvals ADD COLUMN revision TEXT" },
+  { column: "previous_json", ddl: "ALTER TABLE review_approvals ADD COLUMN previous_json TEXT" },
 ];
 
 /** Columns added to `projects` after the original schema; applied idempotently to existing DBs. */
@@ -706,6 +714,8 @@ const REVIEW_PASS_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "published_review_id", ddl: "ALTER TABLE review_passes ADD COLUMN published_review_id INTEGER" },
   { column: "published_commit_sha", ddl: "ALTER TABLE review_passes ADD COLUMN published_commit_sha TEXT" },
   { column: "published_at", ddl: "ALTER TABLE review_passes ADD COLUMN published_at INTEGER" },
+  { column: "decisions_json", ddl: "ALTER TABLE review_passes ADD COLUMN decisions_json TEXT" },
+  { column: "publication_json", ddl: "ALTER TABLE review_passes ADD COLUMN publication_json TEXT" },
 ];
 
 const QUALITY_RUN_MIGRATIONS: { column: string; ddl: string }[] = [

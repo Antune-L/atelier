@@ -1935,18 +1935,22 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       const parsed = createCommentSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
-      const comment = store.addComment(params.id, "user", parsed.data.body, parsed.data.questionId);
+      const { questionId } = parsed.data;
+      if (questionId !== null && !store.getAgentQuestion(params.id, questionId)) {
+        return jsonError(set, HTTP_BAD_REQUEST, "question introuvable sur ce ticket");
+      }
+      const comment = store.addComment(params.id, "user", parsed.data.body, questionId);
       hub.pushComment(comment);
       // A todo card has no implementation session (triage/split sessions share its id): only store
       // the comment, which reaches feasibility analyses and the contract at start.
       if (ticket.column === "todo") {
-        if (parsed.data.questionId) store.markQuestionAnswered(parsed.data.questionId);
+        if (questionId) store.markQuestionAnswered(params.id, questionId);
         return comment;
       }
-      if (parsed.data.questionId) {
-        coordinator.answerQuestion(params.id, parsed.data.questionId, parsed.data.body);
+      if (questionId) {
+        coordinator.answerQuestion(params.id, questionId, parsed.data.body, comment.id);
       } else {
-        coordinator.forwardComment(params.id, parsed.data.body);
+        coordinator.forwardComment(params.id, parsed.data.body, comment.id);
       }
       return comment;
     })

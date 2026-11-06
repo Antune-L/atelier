@@ -19,6 +19,7 @@ import {
   TERMINAL_STAGES,
   type Column,
   type PrState,
+  type ReviewOutcome,
 } from "../../shared/constants.ts";
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
 import { hasUnresolvedImplementation } from "../../shared/implementationPlan.ts";
@@ -47,8 +48,7 @@ import { createAutonomousSessionGuard } from "./autonomousSessionGuard.ts";
 import { AutonomousPartialDelivery } from "./autonomousPartialDelivery.ts";
 import { isFirstFeatureDelivery } from "./prDescription.ts";
 import { buildRecoveryContext, recoveryStage } from "./recoveryContext.ts";
-import { reviewPublicationEvent } from "./reviewFindings.ts";
-import { publishedReviewFindings } from "./reviewPass.ts";
+import { effectiveReviewResult } from "./reviewPass.ts";
 import { assertExecutionAvailable, resolveTicketExecution, type ResolvedExecution } from "./executionConfig.ts";
 import {
   buildAskContract,
@@ -104,11 +104,24 @@ const MERGE_SKIPPED_REVIEW_LEVEL_HIGH_EVENT = "merge_skipped_review_level_high";
 /** Branch-name prefix of a standalone worktree session's fresh branch. */
 const WORKTREE_BRANCH_PREFIX = "worktree";
 
-/** Mirrors what publish_review actually posts: same kept findings, same event → same review state. */
+/**
+ * The review state the done gate expects: the frozen publication intent when one exists (never
+ * recomputed), else what publish_review would post from the effective result.
+ */
 export function reviewPublicationState(reviewPass: ReviewPass | null): ReviewPublicationState | null {
-  const findings = publishedReviewFindings(reviewPass);
-  if (findings === null) return null;
-  return REVIEW_PUBLICATION_STATE_BY_EVENT[reviewPublicationEvent(findings)];
+  if (reviewPass?.publicationIntent) return reviewPass.publicationIntent.expectedState;
+  const effective = effectiveReviewResult(reviewPass);
+  if (effective === null) return null;
+  return REVIEW_PUBLICATION_STATE_BY_EVENT[effective.event];
+}
+
+/**
+ * Only a recorded user decision skips the publication proof, and only while no publication was ever
+ * frozen (the decision path refuses both together). Completeness and head checks still apply.
+ */
+function reviewSkipsPublication(reviewPass: ReviewPass | null): boolean {
+  return reviewPass !== null && !reviewPass.userStateCorrupt && reviewPass.decisions.skipPublication !== null
+    && reviewPass.publicationIntent === null && reviewPass.publishedReviewId === null;
 }
 
 /**
@@ -1613,10 +1626,12 @@ export class SlotManager {
     const provider = projectVcsProvider(ticket.project);
     if (ticket.kind === "review") {
       const reviewPass = this.store.getReviewPass(ticket.id);
+      const intent = reviewPass?.publicationIntent ?? null;
+      const publishes = ticket.postComments && !reviewSkipsPublication(reviewPass);
       return this.system.verifyReviewDone(path, prUrl, {
-        requirePostedSince: ticket.postComments ? ticket.createdAt : null,
-        publicationMarker: ticket.postComments && reviewPass ? `<!-- kanban-review-pass:${reviewPass.passId} -->` : null,
-        expectedCommitSha: reviewPass?.publishedCommitSha ?? reviewPass?.reviewedCommitSha ?? null,
+        requirePostedSince: publishes ? ticket.createdAt : null,
+        publicationMarker: publishes && reviewPass ? intent?.marker ?? `<!-- kanban-review-pass:${reviewPass.passId} -->` : null,
+        expectedCommitSha: reviewPass?.publishedCommitSha ?? intent?.commitSha ?? reviewPass?.reviewedCommitSha ?? null,
         publishedReviewId: reviewPass?.publishedReviewId ?? null,
         expectedReviewState: reviewPublicationState(reviewPass),
         requirePushedBranch: reviewPass?.requiresApproval ? ticket.prHeadBranch : null,
@@ -1916,6 +1931,7 @@ export class SlotManager {
     const deliveryAfterCleanup = this.store.getTicket(ticketId);
     if (currentTicket.autonomous && (deliveryAfterCleanup?.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticketId || deliveryAfterCleanup.column === "abandoned" || deliveryAfterCleanup.autonomousState?.phase !== "delivering")) return { ok: false, reason: "Autonomous delivery was stopped or its worktree ownership changed during cleanup.", slotReleased: false };
     const completedAutonomousState = this.store.getTicket(ticketId)?.autonomousState;
+    const reviewOutcome: ReviewOutcome | null = ticket.kind === "review" && reviewSkipsPublication(this.store.getReviewPass(ticketId)) ? "closed_unpublished" : null;
     this.touch(
       this.store.updateTicket(ticketId, {
         column,
@@ -1926,6 +1942,7 @@ export class SlotManager {
         resolvingConflicts: false,
         error: mergeError,
         agentSummary,
+        reviewOutcome,
         finishedAt: Date.now(),
         ...(currentTicket.autonomous && completedAutonomousState ? { autonomousState: { ...completedAutonomousState, phase: "completed", error: null } } : {}),
       }),
@@ -1938,7 +1955,7 @@ export class SlotManager {
       mergeError ? "failed" : "completed",
       false,
     );
-    await this.notifier.notify("Ticket terminé", this.doneNotifyBody(ticket, mergeError), ticket.id, true);
+    await this.notifier.notify("Ticket terminé", this.doneNotifyBody({ ...ticket, reviewOutcome }, mergeError), ticket.id, true);
     // The PR is open and the branch pushed (gate passed): release any child stacked on this ticket.
     if (!mergeError) void this.startDependents(ticketId).catch((error: unknown) => {
       log.error("libération des tickets dépendants échouée", { ticketId, error: getErrorMessage(error) });
@@ -2228,7 +2245,7 @@ export class SlotManager {
   /** Notification line summarizing how the PR ended (reviewed / cleaned / draft / open / merged / merge failed). */
   private doneNotifyBody(ticket: Ticket, mergeError: string | null): string {
     // Review and clean tickets never open a new PR — they act on an existing one.
-    if (ticket.kind === "review") return `${ticket.title} → revue terminée`;
+    if (ticket.kind === "review") return ticket.reviewOutcome === "closed_unpublished" ? `${ticket.title} → revue terminée sans publication` : `${ticket.title} → revue terminée`;
     if (ticket.kind === "clean") return `${ticket.title} → retours traités`;
     if (ticket.autoMerge) {
       return mergeError

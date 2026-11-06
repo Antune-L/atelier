@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { needsRemoteApproval, startBlocker } from "../shared/startBlocker.ts";
 import { ACTIVE_STAGES, isAllowedAgentPair } from "../shared/constants.ts";
-import type { Column, TicketOrigin } from "../shared/constants.ts";
+import type { Column, ReviewOutcome, TicketOrigin } from "../shared/constants.ts";
 import {
   columnSchema,
   deriveTitleFromDescription,
@@ -145,6 +145,7 @@ export interface CompactTicket {
   autonomousMaxPublicationAttempts?: number;
   dependsOn: string | null;
   scheduledStartAt: number | null;
+  reviewOutcome?: ReviewOutcome | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -261,6 +262,7 @@ function compactTicket(ticket: Ticket): CompactTicket {
     autonomousMaxPublicationAttempts: ticket.autonomousMaxPublicationAttempts,
     dependsOn: ticket.dependsOn,
     scheduledStartAt: ticket.scheduledStartAt,
+    reviewOutcome: ticket.reviewOutcome ?? null,
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
   };

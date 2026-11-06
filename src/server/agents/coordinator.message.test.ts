@@ -147,7 +147,7 @@ test("coordinator persists queued, received and accepted without conflating sema
   const { store, system, sessionHub, close } = setup();
   try {
     sessionHub.start(ACTION_SESSION);
-    expect(sessionHub.sendEvent(ACTION_SESSION.ticketId, { type: "user_comment", body: "Nouveau contexte" })).toBe(true);
+    expect(sessionHub.sendEvent(ACTION_SESSION.ticketId, { type: "user_comment", body: "Nouveau contexte", messageId: null })).toBe(true);
 
     const messages = store.listAgentMessages("action", ACTION_SESSION.ownerId);
     expect(messages).toHaveLength(1);

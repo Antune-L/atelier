@@ -104,9 +104,28 @@ test("a started card still forwards comments and answers to its session", async 
   const created = store.createTicket(makeTicket());
   store.updateTicket(created.id, { column: "implementing", stage: "implementing" });
 
-  expect((await postComment(created.id, { body: "Keep the API" })).status).toBe(200);
-  expect(forwardComment).toHaveBeenCalledWith(created.id, "Keep the API");
+  store.addComment(created.id, "agent", "Modal or page?", "q2");
 
-  expect((await postComment(created.id, { body: "Page", questionId: "q2" })).status).toBe(200);
-  expect(answerQuestion).toHaveBeenCalledWith(created.id, "q2", "Page");
+  const comment = await postComment(created.id, { body: "Keep the API" });
+  expect(comment.status).toBe(200);
+  expect(forwardComment).toHaveBeenCalledWith(created.id, "Keep the API", (await comment.json()).id);
+
+  const answer = await postComment(created.id, { body: "Page", questionId: "q2" });
+  expect(answer.status).toBe(200);
+  expect(answerQuestion).toHaveBeenCalledWith(created.id, "q2", "Page", (await answer.json()).id);
+});
+
+test("an answer to a question of another ticket is rejected before anything is stored", async () => {
+  const { store, answerQuestion, postComment } = setup();
+  const created = store.createTicket(makeTicket());
+  store.updateTicket(created.id, { column: "implementing", stage: "implementing" });
+  const other = store.createTicket(makeTicket());
+  store.addComment(other.id, "agent", "Modal or page?", "q3");
+
+  const response = await postComment(created.id, { body: "Page", questionId: "q3" });
+
+  expect(response.status).toBe(400);
+  expect(store.listComments(created.id)).toEqual([]);
+  expect(store.listComments(other.id).find((comment) => comment.author === "agent")?.answered).toBe(false);
+  expect(answerQuestion).not.toHaveBeenCalled();
 });

@@ -6,7 +6,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import type { CallToolRequest } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-import { COLUMNS, VCS_PROVIDERS } from "../shared/constants.ts";
+import { COLUMNS, REVIEW_OUTCOMES, VCS_PROVIDERS } from "../shared/constants.ts";
 import {
   analyzeTicketsSchema,
   kindSchema,
@@ -45,6 +45,7 @@ const compactTicketSchema = z.object({
   autonomousMaxPublicationAttempts: ticketSchema.shape.autonomousMaxPublicationAttempts,
   dependsOn: z.string().nullable(),
   scheduledStartAt: z.number().nullable().describe("Read-only epoch milliseconds of the planned one-shot launch of a TODO feature ticket, or null when none is planned. Set from the board; update_ticket cannot change it."),
+  reviewOutcome: z.enum(REVIEW_OUTCOMES).nullable().describe("Read-only outcome of a finished review ticket when it differs from its configured publication: closed_unpublished means the review completed and the user decided not to publish it. Null otherwise."),
   createdAt: z.number(),
   updatedAt: z.number(),
 });

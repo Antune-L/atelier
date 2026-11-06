@@ -45,7 +45,7 @@ import {
   TRIAGE_MODEL_META_KEY,
 } from "../../shared/constants.ts";
 import { AUTOMATION_RUNS_LIMIT } from "../../shared/constants.ts";
-import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, ConversationMessageRole, ConversationSessionStatus, ConversationStatus, FeasibilityEngine, Implementer, Orchestrator, PrdDocumentStatus, ReviewDepth, ReviewFlag, ReviewLevel, Stage, TicketOrigin, VcsProvider } from "../../shared/constants.ts";
+import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, ConversationMessageRole, ConversationSessionStatus, ConversationStatus, FeasibilityEngine, Implementer, Orchestrator, PrdDocumentStatus, ReviewDepth, ReviewFlag, ReviewLevel, ReviewOutcome, Stage, TicketOrigin, VcsProvider } from "../../shared/constants.ts";
 import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import { boardNameSchema, dnsHostnameSchema, otherBoardUrlSchema, sshHostAliasSchema } from "../../shared/boardLink.ts";
 import { CARD_TRANSFERRED_EVENT, CARD_TRANSFER_REVERTED_EVENT } from "../../shared/cardTransfer.ts";
@@ -81,6 +81,8 @@ import { safeJsonParse } from "../system/boundedCommand.ts";
 import { minimizeQualityAction, redactSecrets } from "../system/secretRedaction.ts";
 import { mapAuditFindingRow, mapAuditProjectSettingsRow, mapAuditProjectStateRow, mapAuditRunRow, mapQualityActionRow, mapQualityRequestRow, mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapPreviewProjectSettingsRow, mapPreviewRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapMacOutboxRow, mapVpsOutboxReceiptRow, mapVpsPendingSendRow, mapWorktreeSessionRow } from "./rows.ts";
 import type { VpsOutboxReceipt } from "./rows.ts";
+import { EMPTY_REVIEW_PASS_DECISIONS, archivedReviewResultSchema, parseJsonColumn, reviewPassDecisionsSchema, reviewPublicationIntentSchema } from "./reviewDecisions.ts";
+import type { ArchivedReviewResult, ReviewPassDecisions, ReviewPublicationIntent } from "./reviewDecisions.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -152,14 +154,14 @@ export interface ImplementationLotState {
   status: "completed" | "failed" | "interrupted";
 }
 
-function parsePersistedReviewFindings(value: string): ReviewFinding[] {
-  try {
-    const parsed = persistedReviewFindingsSchema.safeParse(JSON.parse(value));
-    return parsed.success ? parsed.data : [];
-  } catch {
-    return [];
-  }
+/** Unreadable findings are `null`: the dimension then counts as failed instead of silently approving. */
+function parsePersistedReviewFindings(value: string): ReviewFinding[] | null {
+  return parseJsonColumn(value, persistedReviewFindingsSchema) ?? null;
 }
+
+const UNREADABLE_REVIEW_FINDINGS_ERROR = "findings persistés illisibles : relance cette dimension";
+const LEGACY_REVIEW_REVISION_PREFIX = "legacy-";
+export const USER_DECISION_APPLIED_EVENT = "user_decision_applied";
 
 export interface PersistedReviewResult {
   kind: ReviewKind;
@@ -170,6 +172,10 @@ export interface PersistedReviewResult {
   verificationStatus: "not_needed" | "pending" | "verified" | "failed";
   error: string | null;
   createdAt: number;
+  /** Attempt that wrote this result; user decisions bind to it and survive only its restoration. */
+  revision: string;
+  /** True while a user-requested rerun holds the previous result aside. */
+  archived: boolean;
 }
 
 export interface ReviewPass {
@@ -186,6 +192,10 @@ export interface ReviewPass {
   createdAt: number;
   approvals: Partial<Record<ReviewKind, boolean>>;
   results: Partial<Record<ReviewKind, PersistedReviewResult>>;
+  decisions: ReviewPassDecisions;
+  publicationIntent: ReviewPublicationIntent | null;
+  /** Unreadable decisions or publication intent: every decision and publication path fails closed. */
+  userStateCorrupt: boolean;
 }
 
 /** Attach the runtime-derived clickable addresses to a persisted worktree session row. */
@@ -496,6 +506,7 @@ export interface TicketPatch {
   reviewFlags?: ReviewFlag[];
   stealthPrTitle?: string | null;
   stealthPrBody?: string | null;
+  reviewOutcome?: ReviewOutcome | null;
   column?: Column;
   stage?: Stage | null;
   model?: AgentModel | null;
@@ -1209,11 +1220,16 @@ export class Store {
     return result.changes === 1;
   }
 
-  /** Persist one reviewer outcome only when its pass is still current. */
+  /**
+   * Persist one reviewer outcome only when its pass is still current and the row still belongs to
+   * the writing attempt (`revision`): a stale attempt can never overwrite the current result. A
+   * completed write drops the result archived by a user-requested rerun.
+   */
   recordReviewResult(input: {
     ticketId: string;
     passId: string;
     kind: ReviewKind;
+    revision: string;
     status: "pending" | "completed" | "failed";
     verdict: "approve" | "revise" | null;
     summary: string;
@@ -1223,10 +1239,16 @@ export class Store {
     createdAt?: number;
   }): boolean {
     const result = this.db.query(
-      `INSERT OR REPLACE INTO review_approvals
-        (ticket_id, pass_id, kind, approved, verdict, summary, findings_json, status, verification_status, error, created_at)
-       SELECT ticket_id, pass_id, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM review_passes
-       WHERE ticket_id = ? AND pass_id = ?`,
+      `INSERT INTO review_approvals
+        (ticket_id, pass_id, kind, approved, verdict, summary, findings_json, status, verification_status, error, revision, previous_json, created_at)
+       SELECT ticket_id, pass_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ? FROM review_passes
+       WHERE ticket_id = ? AND pass_id = ?
+       ON CONFLICT (ticket_id, pass_id, kind) DO UPDATE SET
+         approved = excluded.approved, verdict = excluded.verdict, summary = excluded.summary,
+         findings_json = excluded.findings_json, status = excluded.status,
+         verification_status = excluded.verification_status, error = excluded.error, created_at = excluded.created_at,
+         previous_json = CASE WHEN excluded.status = 'completed' THEN NULL ELSE review_approvals.previous_json END
+       WHERE review_approvals.revision = excluded.revision`,
     ).run(
       input.kind,
       input.verdict === "approve" ? 1 : 0,
@@ -1236,10 +1258,95 @@ export class Store {
       input.status,
       input.verificationStatus,
       input.error,
+      input.revision,
       input.createdAt ?? Date.now(),
       input.ticketId,
       input.passId,
     );
+    return result.changes === 1;
+  }
+
+  /**
+   * Hand the dimension row to a new reviewer attempt (pending, new revision). `archive` moves the
+   * current completed result aside for a user-requested rerun; otherwise a result archived by an
+   * interrupted rerun is carried over so a failure can still restore it.
+   */
+  claimReviewAttempt(input: {
+    ticketId: string;
+    passId: string;
+    kind: ReviewKind;
+    revision: string;
+    archive: ArchivedReviewResult | null;
+  }): boolean {
+    const result = this.db.query(
+      `INSERT INTO review_approvals
+        (ticket_id, pass_id, kind, approved, verdict, summary, findings_json, status, verification_status, error, revision, previous_json, created_at)
+       SELECT ticket_id, pass_id, ?, 0, NULL, '', '[]', 'pending', 'pending', NULL, ?, ?, ? FROM review_passes
+       WHERE ticket_id = ? AND pass_id = ?
+       ON CONFLICT (ticket_id, pass_id, kind) DO UPDATE SET
+         approved = 0, verdict = NULL, summary = '', findings_json = '[]', status = 'pending',
+         verification_status = 'pending', error = NULL, revision = excluded.revision, created_at = excluded.created_at,
+         previous_json = COALESCE(excluded.previous_json, review_approvals.previous_json)`,
+    ).run(
+      input.kind,
+      input.revision,
+      input.archive === null ? null : JSON.stringify(archivedReviewResultSchema.parse(input.archive)),
+      Date.now(),
+      input.ticketId,
+      input.passId,
+    );
+    return result.changes === 1;
+  }
+
+  /** Put back the result archived for a failed attempt, with its original revision and timestamp. */
+  restoreReviewResult(ticketId: string, passId: string, kind: ReviewKind, attemptRevision: string): ArchivedReviewResult | null {
+    return this.transaction(() => {
+      const raw = this.db
+        .query("SELECT * FROM review_approvals WHERE ticket_id = ? AND pass_id = ? AND kind = ? AND revision = ?")
+        .get(ticketId, passId, kind, attemptRevision);
+      if (!raw) return null;
+      const archived = parseJsonColumn(mapReviewApprovalRow(raw).previous_json, archivedReviewResultSchema);
+      if (archived === null || archived === undefined) return null;
+      this.db.query(
+        `UPDATE review_approvals
+         SET approved = ?, verdict = ?, summary = ?, findings_json = ?, status = 'completed', verification_status = ?,
+           error = ?, revision = ?, previous_json = NULL, created_at = ?
+         WHERE ticket_id = ? AND pass_id = ? AND kind = ? AND revision = ?`,
+      ).run(
+        archived.verdict === "approve" ? 1 : 0,
+        archived.verdict,
+        archived.summary,
+        JSON.stringify(archived.findings),
+        archived.verificationStatus,
+        archived.error,
+        archived.revision,
+        archived.createdAt,
+        ticketId,
+        passId,
+        kind,
+        attemptRevision,
+      );
+      return archived;
+    });
+  }
+
+  /** Replace the pass decisions while nothing was frozen for publication and no concurrent write happened. */
+  saveReviewDecisions(ticketId: string, passId: string, expectedRevision: number, decisions: ReviewPassDecisions): boolean {
+    const result = this.db.query(
+      `UPDATE review_passes SET decisions_json = ?
+       WHERE ticket_id = ? AND pass_id = ? AND publication_json IS NULL
+         AND COALESCE(json_extract(decisions_json, '$.revision'), 0) = ?`,
+    ).run(JSON.stringify(reviewPassDecisionsSchema.parse(decisions)), ticketId, passId, expectedRevision);
+    return result.changes === 1;
+  }
+
+  /** Persist the exact publication content once, before the external call; later calls replay it. */
+  freezeReviewPublication(ticketId: string, intent: ReviewPublicationIntent): boolean {
+    const result = this.db.query(
+      `UPDATE review_passes SET publication_json = ?
+       WHERE ticket_id = ? AND pass_id = ? AND publication_json IS NULL
+         AND COALESCE(json_extract(decisions_json, '$.revision'), 0) = ?`,
+    ).run(JSON.stringify(reviewPublicationIntentSchema.parse(intent)), ticketId, intent.passId, intent.decisionsRevision);
     return result.changes === 1;
   }
 
@@ -1258,17 +1365,22 @@ export class Store {
       approvals[kind] = approval.approved === 1;
       const legacyVerdict = approval.approved === 1 ? "approve" : "revise";
       const verdict = approval.verdict === null ? legacyVerdict : reviewVerdictSchema.parse(approval.verdict);
+      const findings = parsePersistedReviewFindings(approval.findings_json);
       results[kind] = {
         kind,
-        status: persistedReviewStatusSchema.parse(approval.status),
+        status: findings === null ? "failed" : persistedReviewStatusSchema.parse(approval.status),
         verdict,
         summary: approval.summary,
-        findings: parsePersistedReviewFindings(approval.findings_json),
+        findings: findings ?? [],
         verificationStatus: reviewVerificationStatusSchema.parse(approval.verification_status),
-        error: approval.error,
+        error: findings === null ? UNREADABLE_REVIEW_FINDINGS_ERROR : approval.error,
         createdAt: approval.created_at,
+        revision: approval.revision ?? `${LEGACY_REVIEW_REVISION_PREFIX}${approval.created_at}`,
+        archived: approval.previous_json !== null,
       };
     }
+    const decisions = parseJsonColumn(row.decisions_json, reviewPassDecisionsSchema);
+    const publicationIntent = parseJsonColumn(row.publication_json, reviewPublicationIntentSchema);
     return {
       ticketId: row.ticket_id,
       passId: row.pass_id,
@@ -1283,6 +1395,9 @@ export class Store {
       createdAt: row.created_at,
       approvals,
       results,
+      decisions: decisions ?? EMPTY_REVIEW_PASS_DECISIONS,
+      publicationIntent: publicationIntent ?? null,
+      userStateCorrupt: decisions === undefined || publicationIntent === undefined,
     };
   }
 
@@ -1751,6 +1866,7 @@ export class Store {
     if (patch.reviewFlags !== undefined) set("review_flags_json", JSON.stringify(patch.reviewFlags));
     if (patch.stealthPrTitle !== undefined) set("stealth_pr_title", patch.stealthPrTitle);
     if (patch.stealthPrBody !== undefined) set("stealth_pr_body", patch.stealthPrBody);
+    if (patch.reviewOutcome !== undefined) set("review_outcome", patch.reviewOutcome);
     if (patch.column !== undefined) {
       set(COLUMN_TO_DB, patch.column);
       // Stamp the entry into "À implémenter" (re-stamped on each re-entry) so the card's
@@ -2041,8 +2157,25 @@ export class Store {
       .run(call.at ?? Date.now(), call.tool, call.projectId ?? null, call.outcome, call.detail ?? null);
   }
 
-  markQuestionAnswered(questionId: string): void {
-    this.db.query("UPDATE comments SET answered = 1 WHERE question_id = ? AND author = 'agent'").run(questionId);
+  markQuestionAnswered(ticketId: string, questionId: string): void {
+    this.db.query("UPDATE comments SET answered = 1 WHERE ticket_id = ? AND question_id = ? AND author = 'agent'").run(ticketId, questionId);
+  }
+
+  getComment(commentId: string): Comment | null {
+    const raw = this.db.query("SELECT * FROM comments WHERE id = ?").get(commentId);
+    return raw ? mapCommentRow(raw) : null;
+  }
+
+  /** Whether the user message already authorised this exact action on this target. */
+  isUserDecisionConsumed(ticketId: string, messageId: string, action: string, target: string): boolean {
+    return this.scalar(
+      `SELECT COUNT(*) AS n FROM events WHERE ticket_id = ? AND type = '${USER_DECISION_APPLIED_EVENT}'
+       AND json_extract(payload, '$.messageId') = ? AND json_extract(payload, '$.action') = ? AND json_extract(payload, '$.target') = ?`,
+      ticketId,
+      messageId,
+      action,
+      target,
+    ) > 0;
   }
 
   /** The agent question `questionId` asked on `ticketId`, or null when this ticket has no such question. */

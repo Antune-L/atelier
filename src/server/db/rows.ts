@@ -10,7 +10,7 @@ import type { PreviewProjectSettings, PreviewRecord } from "../../shared/preview
 import { MAC_OUTBOX_SOURCES, MAC_OUTBOX_STATUSES, VPS_SEND_STATUSES, vpsTicketDraftSchema } from "../../shared/vpsBridge.ts";
 import type { MacOutboxItem, VpsPendingSend } from "../../shared/vpsBridge.ts";
 
-import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER, REVIEW_FLAGS, REVIEW_LEVELS } from "../../shared/constants.ts";
+import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER, REVIEW_FLAGS, REVIEW_LEVELS, REVIEW_OUTCOMES } from "../../shared/constants.ts";
 import type { ActiveSubagent, AgentMessage, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionRun, FinishedSubagent, PrdAnnotation, PrdDocumentRecord, Profile, ResearchOptions, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import {
   prNotificationSchema,
@@ -106,6 +106,7 @@ const ticketRowSchema = z.object({
   review_reason: z.string().nullable().default(null),
   review_flags_json: z.string().nullable().default(null),
   stealth_pr_title: z.string().nullable().default(null),
+  review_outcome: z.string().nullable().default(null),
   stealth_pr_body: z.string().nullable().default(null),
   column_name: z.string(),
   stage: z.string().nullable(),
@@ -380,6 +381,8 @@ const reviewPassRowSchema = z.object({
   published_review_id: z.number().nullable(),
   published_commit_sha: z.string().nullable(),
   published_at: z.number().nullable(),
+  decisions_json: z.string().nullable().default(null),
+  publication_json: z.string().nullable().default(null),
   created_at: z.number(),
 });
 
@@ -394,6 +397,8 @@ const reviewApprovalRowSchema = z.object({
   status: z.string(),
   verification_status: z.string(),
   error: z.string().nullable(),
+  revision: z.string().nullable().default(null),
+  previous_json: z.string().nullable().default(null),
   created_at: z.number(),
 });
 
@@ -419,6 +424,7 @@ function parseSessionUsage(raw: string | null): Ticket["sessionUsage"] {
 }
 
 const reviewLevelColumnSchema = z.enum(REVIEW_LEVELS).nullable().catch(null);
+const reviewOutcomeColumnSchema = z.enum(REVIEW_OUTCOMES).nullable().catch(null);
 const reviewFlagsColumnSchema = z.array(z.enum(REVIEW_FLAGS)).catch([]);
 
 function parseReviewFlags(raw: string | null): Ticket["reviewFlags"] {
@@ -487,6 +493,7 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     reviewReason: row.review_reason,
     reviewFlags: parseReviewFlags(row.review_flags_json),
     stealthPrTitle: row.stealth_pr_title,
+    reviewOutcome: reviewOutcomeColumnSchema.parse(row.review_outcome),
     stealthPrBody: row.stealth_pr_body,
     column: ticketColumnSchema.parse(row.column_name),
     stage: ticketStageSchema.parse(row.stage),

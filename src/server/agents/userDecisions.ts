@@ -11,6 +11,11 @@ export interface UserDecisionRequest {
   interpretation: unknown;
 }
 
+export interface AuthorizedUserDecision {
+  request: UserDecisionRequest;
+  comment: Comment;
+}
+
 export type UserDecisionCheck = { ok: true; comment: Comment } | { ok: false; reason: string };
 
 export function authorizeUserDecision(store: Store, request: UserDecisionRequest): UserDecisionCheck {

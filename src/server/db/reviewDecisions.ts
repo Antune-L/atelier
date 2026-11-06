@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { USER_DISMISSAL_KINDS, USER_REVIEW_VERDICTS } from "../../shared/constants.ts";
 import { reviewFindingSchema, reviewKindSchema } from "../../shared/protocol.ts";
+import { REVIEW_PUBLICATION_EVENTS, REVIEW_PUBLICATION_STATES } from "../system/types.ts";
 
 export const USER_DECISION_APPLIED_EVENT = "user_decision_applied";
 export const USER_DECISION_REFUSED_EVENT = "user_decision_refused";
@@ -53,8 +54,10 @@ export const EMPTY_REVIEW_PASS_DECISIONS: ReviewPassDecisions = {
   skipPublication: null,
 };
 
-const publicationEventSchema = z.enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"]);
-const publicationStateSchema = z.enum(["APPROVED", "CHANGES_REQUESTED", "COMMENTED"]);
+export const reviewVerdictSchema = z.enum(["approve", "revise"]);
+export const reviewVerificationStatusSchema = z.enum(["not_needed", "pending", "verified", "failed"]);
+const publicationEventSchema = z.enum(REVIEW_PUBLICATION_EVENTS);
+const publicationStateSchema = z.enum(REVIEW_PUBLICATION_STATES);
 
 export const reviewPublicationIntentSchema = z.object({
   passId: z.string().min(1),
@@ -73,10 +76,10 @@ export const reviewPublicationIntentSchema = z.object({
 export type ReviewPublicationIntent = z.infer<typeof reviewPublicationIntentSchema>;
 
 export const archivedReviewResultSchema = z.object({
-  verdict: z.enum(["approve", "revise"]).nullable(),
+  verdict: reviewVerdictSchema.nullable(),
   summary: z.string(),
   findings: z.array(reviewFindingSchema),
-  verificationStatus: z.enum(["not_needed", "pending", "verified", "failed"]),
+  verificationStatus: reviewVerificationStatusSchema,
   error: z.string().nullable(),
   createdAt: z.number().int(),
   revision: z.string().min(1),

@@ -5,7 +5,7 @@ import type { Ticket } from "../../shared/schemas.ts";
 import type { Store } from "../db/store.ts";
 
 import { qualifiedFindingId } from "./reviewFindings.ts";
-import { effectiveReviewResult } from "./reviewPass.ts";
+import { applyUserDismissals, completedDimensionFindings } from "./reviewPass.ts";
 
 const MAX_RECOVERY_CONTEXT_LENGTH = 24_000;
 const MAX_RECOVERY_ENTRY_LENGTH = 1_200;
@@ -66,7 +66,8 @@ export function buildRecoveryContext(ticket: Ticket, store: Store, stage: Stage,
   const pass = store.getReviewPass(ticket.id);
   if (pass !== null) {
     append("Passe de review historique", { id: pass.passId, codeFingerprint: pass.codeFingerprint, depth: pass.reviewDepth });
-    const dismissed = new Map((effectiveReviewResult(pass)?.dismissed ?? []).map((entry) => [entry.id, entry.dismissal]));
+    const { dismissed: dismissedEntries } = applyUserDismissals(pass, completedDimensionFindings(pass, reviewKindSchema.options));
+    const dismissed = new Map(dismissedEntries.map((entry) => [entry.id, entry.dismissal]));
     for (const kind of reviewKindSchema.options) {
       const result = pass.results[kind];
       if (!result) continue;

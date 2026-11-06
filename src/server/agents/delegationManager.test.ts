@@ -1198,6 +1198,32 @@ describe("DelegationManager — user decisions on a review ticket", () => {
     expect(replay.result).toContain("déjà autorisé");
   });
 
+  test("an interrupted rerun restores the archived result after a restart and on stop", async () => {
+    const first = setup();
+    const ticket = storedReviewTicket();
+    startParentSession(first.sessionHub, ticket.id);
+    await completePass(first.delegation, first.system, ticket);
+    const before = store.getReviewPass(ticket.id)?.results.conventions;
+    if (!before) throw new Error("conventions result missing");
+    const restartInstruction = store.addComment(ticket.id, "user", "Relance conventions", null);
+    expect((await first.delegation.startReview(ticket, 3, "conventions", "main code", restartInstruction.id)).ok).toBe(true);
+    expect(store.getReviewPass(ticket.id)?.results.conventions?.archived).toBe(true);
+
+    const restarted = setup();
+    const plain = await restarted.delegation.startReview(ticket, 3, "conventions", "diff conventions");
+    expect(plain.ok).toBe(true);
+    expect(plain.result).toContain("déjà rendue");
+    expect(store.getReviewPass(ticket.id)?.results.conventions?.revision).toBe(before.revision);
+
+    const stopInstruction = store.addComment(ticket.id, "user", "Relance encore conventions", null);
+    expect((await restarted.delegation.startReview(ticket, 3, "conventions", "main code", stopInstruction.id)).ok).toBe(true);
+    restarted.delegation.stop(ticket.id);
+    const stopped = store.getReviewPass(ticket.id)?.results.conventions;
+    expect(stopped?.status).toBe("completed");
+    expect(stopped?.revision).toBe(before.revision);
+    expect(stopped?.archived).toBe(false);
+  });
+
   test("dismissing a finding with a user message comments by default and freezes the publication", async () => {
     const { system, sessionHub, delegation } = setup();
     const ticket = storedReviewTicket();

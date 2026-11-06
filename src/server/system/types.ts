@@ -244,8 +244,10 @@ export interface ReviewPublicationComment {
   body: string;
 }
 
-export type ReviewPublicationEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
-export type ReviewPublicationState = "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED";
+export const REVIEW_PUBLICATION_EVENTS = ["APPROVE", "REQUEST_CHANGES", "COMMENT"] as const;
+export type ReviewPublicationEvent = (typeof REVIEW_PUBLICATION_EVENTS)[number];
+export const REVIEW_PUBLICATION_STATES = ["APPROVED", "CHANGES_REQUESTED", "COMMENTED"] as const;
+export type ReviewPublicationState = (typeof REVIEW_PUBLICATION_STATES)[number];
 
 /** The review state each publication event produces, mirrored by the done gate. */
 export const REVIEW_PUBLICATION_STATE_BY_EVENT = {

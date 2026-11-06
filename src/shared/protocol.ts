@@ -259,7 +259,6 @@ export const userDismissalArgSchema = z.object({
   reason: userDecisionReasonArgSchema,
   kind: z.enum(USER_DISMISSAL_KINDS),
 });
-export type UserDismissalArg = z.infer<typeof userDismissalArgSchema>;
 
 export const publishReviewArgsSchema = z
   .object({

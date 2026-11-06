@@ -68,6 +68,13 @@ function activeDismissal(reviewPass: ReviewPass, entry: DimensionFinding): UserD
     dismissal.kind === entry.kind && dismissal.findingId === entry.finding.id && dismissal.resultRevision === revision);
 }
 
+export function completedDimensionFindings(reviewPass: ReviewPass, kinds: readonly ReviewKind[]): DimensionFinding[] {
+  return kinds.flatMap((kind) => {
+    const result = reviewPass.results[kind];
+    return result?.status === "completed" ? result.findings.map((finding) => ({ kind, finding })) : [];
+  });
+}
+
 export function applyUserDismissals(
   reviewPass: ReviewPass,
   entries: DimensionFinding[],

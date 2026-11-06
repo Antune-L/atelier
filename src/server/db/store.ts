@@ -81,7 +81,7 @@ import { safeJsonParse } from "../system/boundedCommand.ts";
 import { minimizeQualityAction, redactSecrets } from "../system/secretRedaction.ts";
 import { mapAuditFindingRow, mapAuditProjectSettingsRow, mapAuditProjectStateRow, mapAuditRunRow, mapQualityActionRow, mapQualityRequestRow, mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapPreviewProjectSettingsRow, mapPreviewRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapMacOutboxRow, mapVpsOutboxReceiptRow, mapVpsPendingSendRow, mapWorktreeSessionRow } from "./rows.ts";
 import type { VpsOutboxReceipt } from "./rows.ts";
-import { EMPTY_REVIEW_PASS_DECISIONS, USER_DECISION_APPLIED_EVENT, archivedReviewResultSchema, parseJsonColumn, reviewPassDecisionsSchema, reviewPublicationIntentSchema } from "./reviewDecisions.ts";
+import { EMPTY_REVIEW_PASS_DECISIONS, USER_DECISION_APPLIED_EVENT, archivedReviewResultSchema, reviewVerdictSchema, reviewVerificationStatusSchema, parseJsonColumn, reviewPassDecisionsSchema, reviewPublicationIntentSchema } from "./reviewDecisions.ts";
 import type { ArchivedReviewResult, ReviewPassDecisions, ReviewPublicationIntent, UserDecisionAction } from "./reviewDecisions.ts";
 
 export type SlotStatus = Slot["status"];
@@ -124,8 +124,6 @@ export class TicketCreationRequestConflictError extends Error {
 const log = createLogger("store");
 const PROVIDER_QUOTA_META_PREFIX = "provider_quota:";
 const persistedReviewStatusSchema = z.enum(["pending", "completed", "failed"]);
-const reviewVerdictSchema = z.enum(["approve", "revise"]);
-const reviewVerificationStatusSchema = z.enum(["not_needed", "pending", "verified", "failed"]);
 const persistedReviewFindingsSchema = z.array(reviewFindingSchema);
 const reviewFileHashesSchema = z.record(z.string(), z.string());
 const implementationLotEventRowSchema = z.object({ type: z.string(), payload: z.string() });
@@ -1101,7 +1099,7 @@ export class Store {
       this.db.query("DELETE FROM review_passes WHERE ticket_id = ?").run(ticketId);
       this.resetImplementationPlan(ticketId);
       this.resetImplementationQueue(ticketId);
-      this.db.query("UPDATE tickets SET review_rounds = 0 WHERE id = ?").run(ticketId);
+      this.db.query("UPDATE tickets SET review_rounds = 0, review_outcome = NULL WHERE id = ?").run(ticketId);
       this.logEvent(ticketId, "delegation_cycle_reset", null);
     });
   }

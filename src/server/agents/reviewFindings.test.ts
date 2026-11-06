@@ -6,9 +6,9 @@ import type { DimensionFinding } from "./reviewFindings.ts";
 import {
   dedupeFindings,
   isSelfRefuting,
-  keptFindings,
   looksFrench,
   reviewProseIsFrench,
+  retainedFindings,
   reviewPublicationEvent,
 } from "./reviewFindings.ts";
 
@@ -195,14 +195,14 @@ describe("reviewPublicationEvent", () => {
   });
 });
 
-describe("keptFindings", () => {
+describe("retainedFindings", () => {
   test("drops rejected and self-refuting findings before deduplicating", () => {
     const entries: DimensionFinding[] = [
       { kind: "logic", finding: finding({ id: "f1", verificationStatus: "rejected", line: 10 }) },
       { kind: "quality", finding: finding({ id: "f2", summary: "Cosmetic only spacing", line: 20 }) },
       { kind: "security", finding: finding({ id: "f3", summary: "Signature never validated", line: 30 }) },
     ];
-    expect(keptFindings(entries).map((item) => item.id)).toEqual(["f3"]);
+    expect(dedupeFindings(retainedFindings(entries)).map((item) => item.id)).toEqual(["f3"]);
   });
 
   test("publishes a critical finding whose evidence contains a concession phrase", () => {
@@ -218,6 +218,6 @@ describe("keptFindings", () => {
         }),
       },
     ];
-    expect(keptFindings(entries).map((item) => item.id)).toEqual(["f1"]);
+    expect(dedupeFindings(retainedFindings(entries)).map((item) => item.id)).toEqual(["f1"]);
   });
 });

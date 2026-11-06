@@ -514,15 +514,12 @@ export const REVIEW_LEVEL_LABELS: Record<CommitLanguage, Record<ReviewLevel, str
 export const REVIEW_FLAGS = ["description_unstructured"] as const;
 export type ReviewFlag = (typeof REVIEW_FLAGS)[number];
 
-/** How a finished review ticket ended when it differs from the configured publication. */
 export const REVIEW_OUTCOMES = ["closed_unpublished"] as const;
 export type ReviewOutcome = (typeof REVIEW_OUTCOMES)[number];
 
-/** Why the user dismissed a review finding before publication. */
 export const USER_DISMISSAL_KINDS = ["false_positive", "accepted_risk"] as const;
 export type UserDismissalKind = (typeof USER_DISMISSAL_KINDS)[number];
 
-/** Publication verdict the user may choose explicitly for a review pass. */
 export const USER_REVIEW_VERDICTS = ["comment", "approve"] as const;
 export type UserReviewVerdict = (typeof USER_REVIEW_VERDICTS)[number];
 

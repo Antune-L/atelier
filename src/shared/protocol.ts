@@ -155,7 +155,6 @@ const prBodyArgSchema = z.string().trim().min(1);
 
 export const USER_DECISION_REASON_MAX_LENGTH = 500;
 export const USER_NOTE_MAX_LENGTH = 4_000;
-/** Id of the user comment (`comments.id`) whose explicit instruction authorises a backend action. */
 const userMessageIdArgSchema = z.string().trim().min(1);
 const userDecisionReasonArgSchema = z.string().trim().min(1).max(USER_DECISION_REASON_MAX_LENGTH);
 

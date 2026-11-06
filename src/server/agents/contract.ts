@@ -326,7 +326,7 @@ export function buildTicketContract(
   const baseBranch = opts.baseBranch;
   const figmaUrls = extractFigmaUrls(ticket.description);
   const isUi = figmaUrls.length > 0;
-  const commentLines = buildCommentsLines(opts.comments ?? [], { en: false, messageIds: true });
+  const commentLines = buildCommentsLines(opts.comments ?? [], { en: false });
   // A stealth ticket runs the full pipeline but opens NO PR: it commits + pushes the branch and
   // signals readiness via ready_for_review() so the user can test locally before any PR is created.
   const stealth = ticket.stealth;
@@ -716,11 +716,6 @@ function buildReviewPublicationStep(ticket: Ticket, vcs: VcsCommandTable): strin
   return `3. Appelle \`publish_review({ passId })\` avec le passId commun reçu dans les événements. Le backend compose et publie une seule review ${vcs.label} liée au commit revu : REQUEST_CHANGES si un finding critical ou major est retenu, COMMENT s'il ne reste que des findings minor, APPROVE si tous les findings ont été rejetés (ou auto-réfutés) ou si tous les reviewers approuvent, après application des décisions explicites de l'utilisateur décrites plus haut. Ne poste aucun commentaire ${vcs.label} directement. Si la PR a avancé, lance une nouvelle passe complète avec tous les reviewers avant de rappeler publish_review.`;
 }
 
-/**
- * How a read-only review session turns a user answer or comment into action: ordinary instructions
- * are applied directly, decisions that change a backend constraint go through a typed action citing
- * the user's message id. Only actions the tools can execute are offered.
- */
 function buildReviewUserDecisionLines(ticket: Ticket, provider: VcsProvider): string[] {
   const publicationDecisions = ticket.postComments
     ? [
@@ -749,7 +744,7 @@ function buildReviewUserDecisionLines(ticket: Ticket, provider: VcsProvider): st
  * Builds the `ticket` channel payload for an independent review of an open PR, optionally posting
  * findings inline via gh, then done().
  */
-export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: CommitLanguage }): string {
+export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: CommitLanguage; comments?: Comment[] }): string {
   if (!isProjectKey(ticket.project)) {
     throw new Error(`Projet inconnu: ${ticket.project}`);
   }
@@ -793,6 +788,8 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
     `Profondeur : ${depth === "full" ? "complète (full)" : "light"}`,
     ...reviewStyleHeaderLines(reviewLanguage, ticket.humanTone),
     `Poster les commentaires sur ${vcs.label} : ${postComments ? "OUI" : "NON"}`,
+    "",
+    ...buildCommentsLines(opts.comments ?? [], { en: false, messageIds: true }),
     "",
     "## Contrat de pipeline",
     buildSpecializedFraming(isCodex, "à la REVUE d'une PR (lecture seule)"),

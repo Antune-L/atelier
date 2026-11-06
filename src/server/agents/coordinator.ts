@@ -721,6 +721,8 @@ export class AgentCoordinator {
     if (ticket?.autonomous) return { ok: false, result: "Use deliver_autonomous: the backend owns autonomous pull request creation and delivery." };
     const parsed = doneArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const { skipPublication } = parsed.data;
+    if (skipPublication !== undefined && ticket?.kind !== "review") return { ok: false, result: "skipPublication est réservé aux tickets review." };
     if (ticket?.kind === "feature") {
       const assessment = deliveryAssessment(parsed.data);
       if (isFirstFeatureDelivery(ticket, this.store.getActiveQualityIteration(ctx.ticketId) !== null)) {
@@ -732,9 +734,7 @@ export class AgentCoordinator {
         this.persistReviewAssessment(ctx.ticketId, assessment, { replace: false });
       }
     }
-    const { skipPublication } = parsed.data;
-    if (skipPublication !== undefined) {
-      if (!ticket || ticket.kind !== "review") return { ok: false, result: "skipPublication est réservé aux tickets review." };
+    if (skipPublication !== undefined && ticket) {
       const recorded = await this.delegation.recordSkipPublication(ticket, ctx.slotId, skipPublication.messageId, skipPublication.reason, ctx.callId);
       if (!recorded.ok) return recorded;
     }

@@ -13,7 +13,8 @@ import { reviewFindingSeveritySchema, reviewKindSchema } from "../../shared/prot
 import type { PublishReviewArgs, ReviewFinding, ReviewKind, recoverImplementationPlanArgsSchema, submitImplementationPlanArgsSchema } from "../../shared/protocol.ts";
 import type { ImplementationPlan, ImplementationPlanLot, ImplementationRecovery } from "../../shared/implementationPlan.ts";
 
-import type { ArchivedReviewResult, ReviewPassDecisions, ReviewPublicationIntent, UserDismissal } from "../db/reviewDecisions.ts";
+import { REVIEW_DELEGATED_EVENT, REVIEW_PUBLICATION_DISCARDED_EVENT, REVIEW_PUBLICATION_FROZEN_EVENT, REVIEW_RERUN_DELEGATED_EVENT, REVIEW_RERUN_RESTORED_EVENT, USER_DECISION_ACTIONS } from "../db/reviewDecisions.ts";
+import type { ArchivedReviewResult, ReviewPassDecisions, ReviewPublicationIntent, UserDecisionAction, UserDismissal } from "../db/reviewDecisions.ts";
 import type { PersistedReviewResult, ReviewPass, Store } from "../db/store.ts";
 import { getProject, isProjectKey, MODELS, projectVcsProvider } from "../config.ts";
 import type { ClientHub } from "../hub.ts";
@@ -37,7 +38,7 @@ import {
 } from "./reviewFindings.ts";
 import { allowedReviewPasses, applyUserDismissals, effectiveReviewResult, passDimensionFindings, requiredReviewKinds, withUnreviewedChangesSection } from "./reviewPass.ts";
 import type { DismissedFinding, EffectiveReviewResult, UnreviewedChanges } from "./reviewPass.ts";
-import { USER_DECISION_ACTIONS, authorizeUserDecision, recordUserDecision, refuseUserDecision } from "./userDecisions.ts";
+import { authorizeUserDecision, recordUserDecision, refuseUserDecision } from "./userDecisions.ts";
 import type { UserDecisionRequest } from "./userDecisions.ts";
 import { createAutonomousSessionGuard } from "./autonomousSessionGuard.ts";
 import { resolvePrTargetBaseBranch } from "./baseBranch.ts";
@@ -219,7 +220,6 @@ interface ActiveReview {
   slotId: number;
   kind: ReviewKind;
   passId: string;
-  /** Attempt id owning the dimension row: every write of this attempt is conditional on it. */
   revision: string;
   generation: number;
   generationId: string;
@@ -292,9 +292,8 @@ function renderPersistedReviewResult(passId: string, result: PersistedReviewResu
 }
 
 const USER_DISMISSAL_LABELS_FR: Record<UserDismissalKind, string> = { false_positive: "faux positif", accepted_risk: "risque accepté" };
-const CORRUPT_REVIEW_DECISIONS_REFUSAL = "Publication refusée : les décisions ou la publication persistées de cette passe sont illisibles : appelle fail() avec ce diagnostic.";
+const CORRUPT_REVIEW_DECISIONS_REFUSAL = "Publication refusée : les décisions ou la publication persistées de cette passe sont illisibles : lance une nouvelle passe complète (toutes les dimensions, sans rerun) pour les remplacer.";
 
-/** Creation time of the newest required result: a pass-level decision must not predate it. */
 function latestResultTime(reviewPass: ReviewPass): number {
   return Math.max(0, ...requiredReviewKinds(reviewPass.reviewDepth).map((kind) => reviewPass.results[kind]?.createdAt ?? 0));
 }
@@ -304,10 +303,6 @@ function findingLocation(finding: ReviewFinding): string {
   return finding.line === null ? finding.path : `${finding.path}:${finding.line}`;
 }
 
-/**
- * The ids the user decisions target and their dedup groups (one group = one published comment), plus
- * the decisions already recorded. Dismissing an id removes that source finding only, never its group.
- */
 function renderReviewDecisionState(reviewPass: ReviewPass, kinds: ReviewKind[]): string {
   const entries: DimensionFinding[] = kinds.flatMap((kind) => {
     const result = reviewPass.results[kind];
@@ -336,11 +331,19 @@ function renderReviewDecisionState(reviewPass: ReviewPass, kinds: ReviewKind[]):
     const state = reviewPass.publishedReviewId === null ? "incertaine : rappelle publish_review({ passId }) pour la rejouer à l'identique" : "confirmée";
     lines.push(`Publication figée (${reviewPass.publicationIntent.event}) : ${state}. Aucune nouvelle décision ni relance n'est possible sur cette passe.`);
   }
-  if (reviewPass.userStateCorrupt) lines.push("Décisions ou publication persistées illisibles : publication, relance et clôture sans publication sont bloquées.");
+  if (reviewPass.userStateCorrupt) lines.push("Décisions ou publication persistées illisibles : publication, relance et clôture sans publication sont bloquées ; une nouvelle passe complète les remplace.");
   return lines.join("\n");
 }
 
-/** Idempotent answer to a delegate_review on a dimension that already rendered its verdict. */
+const NO_REVIEW_PASS_TARGET = "aucune passe";
+
+function publicationDecisionAction(args: PublishReviewArgs): UserDecisionAction | null {
+  if (args.dismiss !== undefined) return USER_DECISION_ACTIONS.dismissFinding;
+  if (args.note !== undefined) return USER_DECISION_ACTIONS.attachNote;
+  if (args.verdict !== undefined) return USER_DECISION_ACTIONS.chooseVerdict;
+  return null;
+}
+
 function alreadyRenderedReview(kind: ReviewKind, passId: string): { ok: true; result: string } {
   return {
     ok: true,
@@ -488,8 +491,17 @@ function renderDismissedFinding(entry: DismissedFinding, labels: ReviewReportLab
   return `- ${finding.summary} (${findingLocation(finding)}) — ${labels.dismissedBy[dismissal.category]} — ${dismissal.reason}`;
 }
 
-/** Report body: the header follows the review event, then the user note, kept findings and dismissals. */
-function renderEffectiveReviewReport(effective: EffectiveReviewResult, labels: ReviewReportLabels, style: FindingRenderStyle): string {
+function hasUserDecisions(reviewPass: ReviewPass): boolean {
+  const { dismissals, note, verdict, skipPublication } = reviewPass.decisions;
+  return dismissals.length > 0 || note !== null || verdict !== null || skipPublication !== null;
+}
+
+function reportHeadingEvent(effective: EffectiveReviewResult, eventHeading: boolean): ReviewPublicationEvent {
+  if (eventHeading) return effective.event;
+  return effective.findings.length > 0 ? "REQUEST_CHANGES" : "APPROVE";
+}
+
+function renderEffectiveReviewReport(effective: EffectiveReviewResult, labels: ReviewReportLabels, style: FindingRenderStyle, eventHeading: boolean): string {
   const { findings, dismissed, note } = effective;
   const counts = reviewFindingSeveritySchema.options.flatMap((severity) => {
     const count = findings.filter((finding) => finding.severity === severity).length;
@@ -504,7 +516,7 @@ function renderEffectiveReviewReport(effective: EffectiveReviewResult, labels: R
     ? ""
     : `${labels.dismissedHeading}\n\n${dismissed.map((entry) => renderDismissedFinding(entry, labels)).join("\n")}`;
   const sections = [
-    `**${labels.headings[effective.event]}**`,
+    `**${labels.headings[reportHeadingEvent(effective, eventHeading)]}**`,
     effective.skipPublicationReason === null ? "" : labels.closedUnpublished(effective.skipPublicationReason),
     note === null ? "" : `${labels.noteHeading}\n\n${note}`,
     style.humanTone ? "" : labels.keptLine(findings.length, countSummary),
@@ -1392,11 +1404,13 @@ export class DelegationManager {
     labels: ReviewReportLabels,
     style: FindingRenderStyle,
   ): string | null {
-    const effective = effectiveReviewResult(this.store.getReviewPass(ticketId), style);
-    return effective === null ? null : renderEffectiveReviewReport(effective, labels, style);
+    const reviewPass = this.store.getReviewPass(ticketId);
+    const effective = effectiveReviewResult(reviewPass, style);
+    if (reviewPass === null || effective === null) return null;
+    const eventHeading = this.store.getTicket(ticketId)?.kind === "review" || hasUserDecisions(reviewPass);
+    return renderEffectiveReviewReport(effective, labels, style, eventHeading);
   }
 
-  /** Serialize on the review start queue: publication, reruns and skip decisions never interleave. */
   private enqueueReviewOperation<T>(ticketId: string, operation: () => Promise<T>): Promise<T> {
     const previous = this.reviewStartQueues.get(ticketId) ?? Promise.resolve();
     const queued = previous.catch(() => undefined).then(operation);
@@ -1449,12 +1463,9 @@ export class DelegationManager {
       this.publishReviewUnderRepoLock(ticket, slotId, prUrl, args, epoch));
   }
 
-  /**
-   * Once a publication was frozen, decisions can no longer change it: a call carrying the same user
-   * message is a replay, any other decision is refused.
-   */
   private publicationDecisionReplayRefusal(reviewPass: ReviewPass, args: PublishReviewArgs): { ok: false; result: string } | null {
-    if (reviewPass.publicationIntent === null || args.messageId === undefined) return null;
+    const action = publicationDecisionAction(args);
+    if (reviewPass.publicationIntent === null || args.messageId === undefined || action === null) return null;
     const recorded = [
       ...reviewPass.decisions.dismissals.map((dismissal) => dismissal.messageId),
       reviewPass.decisions.note?.messageId,
@@ -1464,15 +1475,11 @@ export class DelegationManager {
     return refuseUserDecision(this.store, {
       ticketId: reviewPass.ticketId,
       messageId: args.messageId,
-      action: USER_DECISION_ACTIONS.dismissFinding,
+      action,
       target: reviewPass.passId,
     }, "une publication de cette passe a déjà été tentée ; son contenu est figé. Rappelle publish_review({ passId }) sans décision pour la rejouer à l'identique");
   }
 
-  /**
-   * Validate the user decisions carried by publish_review against the current pass, without writing
-   * anything. Every target must exist, be current and not yet consumed for this message.
-   */
   private validatePublicationDecisions(
     reviewPass: ReviewPass,
     args: PublishReviewArgs & { messageId: string },
@@ -1590,6 +1597,10 @@ export class DelegationManager {
         ...publicationPayload,
         error: published.reason,
       });
+      if (published.notPosted === true && this.store.discardReviewPublication(ticket.id, passId)) {
+        this.store.logEvent(ticket.id, REVIEW_PUBLICATION_DISCARDED_EVENT, { passId, reason: published.reason });
+        return { ok: false, result: `Publication refusée avant tout envoi : ${published.reason}. Rien n'a été publié et le contenu figé est abandonné : si la PR a avancé, lance une nouvelle passe complète ; sinon corrige la cause puis rappelle publish_review({ passId }) sans décision, les décisions déjà enregistrées restent appliquées.` };
+      }
       return { ok: false, result: `Publication refusée : ${published.reason}. Le contenu reste figé : rappelle publish_review({ passId }) pour la rejouer à l'identique.` };
     }
     if (!this.store.recordReviewPublication({
@@ -1615,10 +1626,6 @@ export class DelegationManager {
     };
   }
 
-  /**
-   * Record the user decisions of this call and freeze everything the publication posts, in one
-   * transaction and before any external call: a retry replays exactly this content.
-   */
   private freezePublication(ticket: Ticket, currentPass: ReviewPass, args: PublishReviewArgs): ReviewPublicationIntent | { ok: false; result: string } {
     const reviewedCommitSha = currentPass.reviewedCommitSha;
     if (reviewedCommitSha === null) {
@@ -1635,7 +1642,7 @@ export class DelegationManager {
     const options = this.reviewerOptions(ticket);
     const effective = effectiveReviewResult(decidedPass, options);
     if (effective === null) return { ok: false, result: "Publication refusée : résultats de review incomplets." };
-    const report = renderEffectiveReviewReport(effective, REVIEW_REPORT_LABELS[options.language], options);
+    const report = renderEffectiveReviewReport(effective, REVIEW_REPORT_LABELS[options.language], options, true);
     const hasUserContent = effective.note !== null || effective.dismissed.length > 0;
     const provider = projectVcsProvider(ticket.project);
     const intent: ReviewPublicationIntent = {
@@ -1663,21 +1670,17 @@ export class DelegationManager {
       return true;
     });
     if (!frozen) return { ok: false, result: "Publication annulée : la passe courante a changé. Relis read_review_results puis rappelle publish_review." };
-    this.store.logEvent(ticket.id, "review_publication_frozen", { passId: intent.passId, event: intent.event, decisionsRevision: intent.decisionsRevision, dismissedFindingIds: intent.dismissedFindingIds });
+    this.store.logEvent(ticket.id, REVIEW_PUBLICATION_FROZEN_EVENT, { passId: intent.passId, event: intent.event, decisionsRevision: intent.decisionsRevision, dismissedFindingIds: intent.dismissedFindingIds });
     return intent;
   }
 
-  /**
-   * Record the user's decision to close a complete review without publishing it. Serialized with
-   * publication: refused once any publication attempt was frozen, replayed for the same message.
-   */
   async recordSkipPublication(ticket: Ticket, slotId: number, messageId: string, reason: string, correlationId: string): Promise<{ ok: boolean; result: string }> {
     return this.enqueueReviewOperation(ticket.id, () => this.recordSkipPublicationNow(ticket, slotId, messageId, reason, correlationId));
   }
 
   private async recordSkipPublicationNow(ticket: Ticket, slotId: number, messageId: string, reason: string, correlationId: string): Promise<{ ok: boolean; result: string }> {
     const reviewPass = this.store.getReviewPass(ticket.id);
-    const request = { ticketId: ticket.id, messageId, action: USER_DECISION_ACTIONS.skipPublication, target: reviewPass?.passId ?? "aucune passe" };
+    const request = { ticketId: ticket.id, messageId, action: USER_DECISION_ACTIONS.skipPublication, target: reviewPass?.passId ?? NO_REVIEW_PASS_TARGET };
     if (!ticket.postComments) return refuseUserDecision(this.store, request, "cette revue n'est pas configurée pour publier : appelle done(pr_url) sans skipPublication");
     if (!reviewPass) return refuseUserDecision(this.store, request, "aucune passe de review enregistrée");
     if (reviewPass.userStateCorrupt) return refuseUserDecision(this.store, request, "décisions ou publication persistées illisibles");
@@ -2070,12 +2073,10 @@ export class DelegationManager {
     const startId = nanoid(8);
     const startedAt = Date.now();
     const epoch = this.reviewEpochs.get(ticket.id) ?? 0;
-    const previous = this.reviewStartQueues.get(ticket.id) ?? Promise.resolve();
     const queuedBehindAnotherStart = this.reviewStartQueues.has(ticket.id);
     log.info("review mise en file de démarrage", { ticketId: ticket.id, kind, startId, queuedBehindAnotherStart });
-    const queued = previous
-      .catch(() => undefined)
-      .then(() => {
+    try {
+      return await this.enqueueReviewOperation(ticket.id, () => {
         log.info("review sortie de la file de démarrage", {
           ticketId: ticket.id,
           kind,
@@ -2084,9 +2085,6 @@ export class DelegationManager {
         });
         return this.startReviewNow(ticket, slotId, kind, context, epoch, startId, rerunMessageId);
       });
-    this.reviewStartQueues.set(ticket.id, queued);
-    try {
-      return await queued;
     } catch (error) {
       const reason = getErrorMessage(error);
       log.error("démarrage de review échoué", {
@@ -2102,7 +2100,6 @@ export class DelegationManager {
       const timing = { ticketId: ticket.id, kind, startId, elapsedMs };
       if (elapsedMs >= SLOW_REVIEW_START_WARN_MS) log.warn("démarrage de review LENT", timing);
       else log.info("démarrage de review", timing);
-      if (this.reviewStartQueues.get(ticket.id) === queued) this.reviewStartQueues.delete(ticket.id);
     }
   }
 
@@ -2164,13 +2161,8 @@ export class DelegationManager {
     };
   }
 
-  /**
-   * A frozen publication whose receipt is missing may already be partly visible on the host: the pass
-   * holding it must not be replaced before publish_review replays and reconciles it.
-   */
   private uncertainPublicationRefusal(ticketId: string): { ok: false; result: string } | null {
     const persisted = this.store.getReviewPass(ticketId);
-    if (persisted?.userStateCorrupt) return { ok: false, result: CORRUPT_REVIEW_DECISIONS_REFUSAL };
     if (!persisted?.publicationIntent || persisted.publishedReviewId !== null) return null;
     return {
       ok: false,
@@ -2255,6 +2247,7 @@ export class DelegationManager {
       && persisted.reviewDepth === depth
       && persisted.reviewedCommitSha === reviewedCommitSha
       && persisted.requiresApproval === requiresApproval
+      && !persisted.userStateCorrupt
     ) {
       const restored: ActiveReviewPass = {
         passId: persisted.passId,
@@ -2355,11 +2348,6 @@ export class DelegationManager {
     return this.launchReviewer({ ticket, slotId, kind, context, epoch, reviewPass, archive: null, executionGuard, decision: null });
   }
 
-  /**
-   * Validate a user-requested rerun of one completed dimension. `null` when the dimension has no
-   * completed result (the ordinary start path applies). Never starts a new pass: the PR head, the
-   * code fingerprint and the depth must still be the reviewed ones, and nothing may be published.
-   */
   private async prepareReviewRerun(
     ticket: Ticket,
     slotId: number,
@@ -2524,7 +2512,7 @@ export class DelegationManager {
       this.failReviewAttempt(state, { verdict: null, summary: message, findings: [], verificationStatus: "not_needed" }, message);
       return { ok: false, result: `Impossible de lancer la review ${kind} : ${message}` };
     }
-    this.store.logEvent(ticket.id, archive === null ? "review_delegated" : "review_rerun_delegated", {
+    this.store.logEvent(ticket.id, archive === null ? REVIEW_DELEGATED_EVENT : REVIEW_RERUN_DELEGATED_EVENT, {
       kind,
       provider: execution.provider,
       model: execution.model,
@@ -2539,10 +2527,6 @@ export class DelegationManager {
     };
   }
 
-  /**
-   * Persist a failed attempt. A result archived for a user-requested rerun is restored instead, with
-   * its original revision, so decisions bound to it stay valid.
-   */
   private failReviewAttempt(
     state: ActiveReview,
     attempt: { verdict: ReviewResult["verdict"] | null; summary: string; findings: ReviewFinding[]; verificationStatus: "not_needed" | "verified" | "failed" },
@@ -2551,7 +2535,7 @@ export class DelegationManager {
   ): void {
     const restored = this.store.restoreReviewResult(state.ticketId, state.passId, state.kind, state.revision);
     if (restored !== null) {
-      this.store.logEvent(state.ticketId, "review_rerun_restored", { kind: state.kind, passId: state.passId, failedRevision: state.revision, restoredRevision: restored.revision, error: failure });
+      this.store.logEvent(state.ticketId, REVIEW_RERUN_RESTORED_EVENT, { kind: state.kind, passId: state.passId, failedRevision: state.revision, restoredRevision: restored.revision, error: failure });
       this.deliverReviewResult(state, false, null, `${delivered} — relance échouée : le résultat précédent de ${state.kind} est restauré, relis-le avec read_review_results`);
       return;
     }
@@ -2802,8 +2786,8 @@ export class DelegationManager {
   }
 
   /**
-   * Persist and deliver a completed attempt. A completed dimension MUST carry a verdict and a
-   * summary: a blank one silently publishes an empty review round, so it is a failure instead.
+   * A completed dimension MUST carry a verdict and a summary: a blank one silently publishes an
+   * empty review round. Anything short of that is persisted as an explicit failure instead.
    */
   private completeReviewAttempt(
     state: ActiveReview,
@@ -2833,7 +2817,10 @@ export class DelegationManager {
       verificationStatus,
       error: null,
     });
-    if (!recorded) log.warn("résultat de review obsolète non persisté", { ticketId: state.ticketId, kind: state.kind, revision: state.revision });
+    if (!recorded) {
+      log.warn("résultat de review obsolète ignoré", { ticketId: state.ticketId, kind: state.kind, revision: state.revision });
+      return;
+    }
     this.deliverReviewResult(state, true, result, "");
   }
 

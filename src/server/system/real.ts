@@ -1325,14 +1325,15 @@ export class RealSystemAdapter implements SystemAdapter {
     provider: VcsProvider,
   ): Promise<PublishReviewResult> {
     const account = await githubAccountGate(slotPath);
-    if (account) return { ...account, reviewId: null };
+    if (account) return { ...account, reviewId: null, notPosted: true };
     const current = await this.readReviewHead(slotPath, prUrl, provider);
-    if (!current.ok || current.commitSha === null) return { ok: false, reason: current.reason, reviewId: null };
+    if (!current.ok || current.commitSha === null) return { ok: false, reason: current.reason, reviewId: null, notPosted: true };
     if (current.commitSha !== opts.expectedCommitSha) {
       return {
         ok: false,
         reason: "la PR a avancé depuis cette passe : lance une nouvelle passe de review complète, sans republier celle-ci",
         reviewId: null,
+        notPosted: true,
       };
     }
     return this.vcs(provider).publishReview(slotPath, prUrl, opts);

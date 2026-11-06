@@ -265,6 +265,7 @@ export interface PublishReviewOptions {
 export interface PublishReviewResult extends DoneGateResult {
   reviewId: number | null;
   actualState?: ReviewPublicationState;
+  notPosted?: boolean;
 }
 
 /** A tmux window's geometry, used to decide whether a viewer connect will reflow (and reprint) the pane. */

@@ -192,12 +192,10 @@ export function dedupeFindings(
   return clusterFindings(entries).map((cluster) => mergeCluster(cluster, style));
 }
 
-/** Kind-qualified source id (`kind:id`) the user cites to target exactly one reviewer finding. */
 export function qualifiedFindingId(entry: DimensionFinding): string {
   return entry.kind === null ? entry.finding.id : `${entry.kind}:${entry.finding.id}`;
 }
 
-/** The dedup groups `dedupeFindings` merges, member by member, in publication order. */
 export function clusterFindings(entries: DimensionFinding[]): DimensionFinding[][] {
   const clusters: DimensionFinding[][] = [];
   const byAnchor = new Map<string, DimensionFinding[]>();
@@ -224,17 +222,8 @@ export function reviewPublicationEvent(findings: ReviewFinding[]): ReviewPublica
   return findings.some((finding) => finding.severity !== "minor") ? "REQUEST_CHANGES" : "COMMENT";
 }
 
-/** Source findings eligible for publication: not rejected by verification, not self-refuting. */
 export function retainedFindings(entries: DimensionFinding[]): DimensionFinding[] {
   return entries.filter((entry) => entry.finding.verificationStatus !== "rejected" && !isSelfRefuting(entry.finding));
-}
-
-/** Findings actually published: verified, not self-refuting, deduplicated across dimensions. */
-export function keptFindings(
-  entries: DimensionFinding[],
-  style: FindingRenderStyle = DEFAULT_FINDING_RENDER_STYLE,
-): ReviewFinding[] {
-  return dedupeFindings(retainedFindings(entries), style);
 }
 
 /**

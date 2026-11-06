@@ -1,12 +1,24 @@
-/**
- * User decisions attached to a review pass and the frozen publication intent. Both live outside the
- * reviewer output schema (`reviewFindingSchema`): reviewers never see or emit user-only statuses.
- */
-
 import { z } from "zod";
 
 import { USER_DISMISSAL_KINDS, USER_REVIEW_VERDICTS } from "../../shared/constants.ts";
 import { reviewFindingSchema, reviewKindSchema } from "../../shared/protocol.ts";
+
+export const USER_DECISION_APPLIED_EVENT = "user_decision_applied";
+export const USER_DECISION_REFUSED_EVENT = "user_decision_refused";
+export const REVIEW_PUBLICATION_FROZEN_EVENT = "review_publication_frozen";
+export const REVIEW_PUBLICATION_DISCARDED_EVENT = "review_publication_discarded";
+export const REVIEW_DELEGATED_EVENT = "review_delegated";
+export const REVIEW_RERUN_DELEGATED_EVENT = "review_rerun_delegated";
+export const REVIEW_RERUN_RESTORED_EVENT = "review_rerun_restored";
+
+export const USER_DECISION_ACTIONS = {
+  rerunReview: "rerun_review",
+  dismissFinding: "dismiss_finding",
+  attachNote: "attach_note",
+  chooseVerdict: "choose_verdict",
+  skipPublication: "skip_publication",
+} as const;
+export type UserDecisionAction = (typeof USER_DECISION_ACTIONS)[keyof typeof USER_DECISION_ACTIONS];
 
 export const userDismissalSchema = z.object({
   kind: reviewKindSchema,
@@ -44,7 +56,6 @@ export const EMPTY_REVIEW_PASS_DECISIONS: ReviewPassDecisions = {
 const publicationEventSchema = z.enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"]);
 const publicationStateSchema = z.enum(["APPROVED", "CHANGES_REQUESTED", "COMMENTED"]);
 
-/** Everything a publication posts, persisted before the external call so retries replay it exactly. */
 export const reviewPublicationIntentSchema = z.object({
   passId: z.string().min(1),
   commitSha: z.string().min(1),
@@ -61,7 +72,6 @@ export const reviewPublicationIntentSchema = z.object({
 });
 export type ReviewPublicationIntent = z.infer<typeof reviewPublicationIntentSchema>;
 
-/** A completed dimension result moved aside while a user-requested rerun of that dimension runs. */
 export const archivedReviewResultSchema = z.object({
   verdict: z.enum(["approve", "revise"]).nullable(),
   summary: z.string(),
@@ -73,7 +83,6 @@ export const archivedReviewResultSchema = z.object({
 });
 export type ArchivedReviewResult = z.infer<typeof archivedReviewResultSchema>;
 
-/** Fail-closed JSON column parser: `undefined` when the stored value is unreadable. */
 export function parseJsonColumn<T>(value: string | null, schema: z.ZodType<T>): T | null | undefined {
   if (value === null) return null;
   try {

@@ -1,6 +1,6 @@
 /**
- * Selection of the findings a review pass actually publishes, after the user decisions. Shared by the
- * publication path, the reports, the recovery context and the done gate so all derive the same set.
+ * Selection of the findings a review pass actually publishes. Shared by the publication path and by
+ * the done gate so both derive the same GitHub review event from the same set.
  */
 
 import { MAX_REVIEW_ROUNDS, type ReviewDepth, type UserReviewVerdict } from "../../shared/constants.ts";
@@ -44,23 +44,19 @@ export function passDimensionFindings(reviewPass: ReviewPass | null): DimensionF
 }
 
 export interface DismissedFinding {
-  /** Kind-qualified source id (`kind:id`). */
   id: string;
   finding: ReviewFinding;
   dismissal: UserDismissal;
 }
 
-/** What the pass publishes once the user decisions are applied: the single source for every consumer. */
 export interface EffectiveReviewResult {
   findings: ReviewFinding[];
   dismissed: DismissedFinding[];
   event: ReviewPublicationEvent;
   note: string | null;
-  /** Reason of the user's decision to close the review without publishing it. */
   skipPublicationReason: string | null;
 }
 
-/** The dismissal of this exact source finding, only while it targets the dimension's current result. */
 function activeDismissal(reviewPass: ReviewPass, entry: DimensionFinding): UserDismissal | undefined {
   if (entry.kind === null) return undefined;
   const revision = reviewPass.results[entry.kind]?.revision;
@@ -68,7 +64,6 @@ function activeDismissal(reviewPass: ReviewPass, entry: DimensionFinding): UserD
     dismissal.kind === entry.kind && dismissal.findingId === entry.finding.id && dismissal.resultRevision === revision);
 }
 
-/** Split the retained source findings into those still published and those the user dismissed. */
 export function applyUserDismissals(
   reviewPass: ReviewPass,
   entries: DimensionFinding[],
@@ -83,10 +78,6 @@ export function applyUserDismissals(
   return { published, dismissed };
 }
 
-/**
- * Review event after the user decisions: an explicit `comment` verdict always comments; once the
- * user dismissed findings and nothing remains, the pass comments unless the user chose `approve`.
- */
 export function userReviewEvent(findings: ReviewFinding[], hasDismissals: boolean, verdict: UserReviewVerdict | null): ReviewPublicationEvent {
   if (verdict === "comment") return "COMMENT";
   const event = reviewPublicationEvent(findings);
@@ -94,7 +85,6 @@ export function userReviewEvent(findings: ReviewFinding[], hasDismissals: boolea
   return event;
 }
 
-/** The effective result of a complete pass, or `null` while incomplete or when its decisions are unreadable. */
 export function effectiveReviewResult(
   reviewPass: ReviewPass | null,
   style: FindingRenderStyle = DEFAULT_FINDING_RENDER_STYLE,

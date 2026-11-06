@@ -229,7 +229,6 @@ function renderImplementationDone(event: Extract<ChannelEvent, { type: "implemen
 /** Frames a chat message sent while the agent is running a turn. */
 export const STEER_PREFIX = "Aiguillage de l'utilisateur pendant ton tour (réoriente le travail en cours sans repartir de zéro) : ";
 
-/** The user comment id an agent cites (`messageId`) when a backend action executes this instruction. */
 function userMessageReference(messageId: string | null): string {
   return messageId === null ? "" : `, messageId ${messageId}`;
 }

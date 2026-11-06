@@ -13,7 +13,7 @@ import { Store } from "../db/store.ts";
 import { ClientHub } from "../hub.ts";
 import type { AgentSessionHandle, AgentSessionOptions, AgentTurnUsage } from "../system/agentSession.ts";
 import { FakeSystemAdapter } from "../system/fake.ts";
-import type { CodeSnapshot, DoneGateResult, PublishReviewOptions, PublishReviewResult } from "../system/types.ts";
+import type { CodeSnapshot, DoneGateResult, PublishReviewOptions, PublishReviewResult, ReviewHeadResult } from "../system/types.ts";
 import { FIXTURE_PROJECT_KEY } from "../testing/fixtures.ts";
 import { removeDbFiles, tmpDbPath } from "../testing/tmpDb.ts";
 
@@ -35,6 +35,7 @@ class RecordingSystemAdapter extends FakeSystemAdapter {
   readonly sessions: RecordedSession[] = [];
   readonly publishedReviews: PublishReviewOptions[] = [];
   fingerprint = "code-v1";
+  movedReviewHead: string | null = null;
   fileHashes: Record<string, string> = {};
   prBody = "";
   fingerprintCalls = 0;
@@ -45,6 +46,11 @@ class RecordingSystemAdapter extends FakeSystemAdapter {
   override async codeFingerprint(): Promise<string> {
     this.fingerprintCalls++;
     return this.fingerprint;
+  }
+
+  override async readReviewHead(slotPath: string, prUrl: string, provider: VcsProvider): Promise<ReviewHeadResult> {
+    if (this.movedReviewHead === null) return super.readReviewHead(slotPath, prUrl, provider);
+    return { ok: true, reason: "", commitSha: this.movedReviewHead };
   }
 
   override async codeSnapshot(): Promise<CodeSnapshot> {
@@ -917,7 +923,7 @@ describe("DelegationManager — review report and publication", () => {
     });
 
     const report = delegation.reviewReport(ticket.id);
-    expect(report).toContain("**Review complete — comments**");
+    expect(report).toContain("**Review complete — changes recommended**");
     expect(report).toContain("1 finding(s) kept: 1 minor.");
     expect(report).not.toContain("retenu");
   });
@@ -939,7 +945,7 @@ describe("DelegationManager — review report and publication", () => {
     });
 
     const report = delegation.reviewBoardReport(ticket.id);
-    expect(report).toContain("**Revue terminée — commentaires**");
+    expect(report).toContain("**Revue terminée — modifications recommandées**");
     expect(report).toContain("1 finding(s) retenu(s) : 1 minor.");
     expect(report).toContain("## Findings hors du diff");
     expect(report).not.toContain("Review complete");
@@ -1224,6 +1230,25 @@ describe("DelegationManager — user decisions on a review ticket", () => {
     expect(late.result).toContain("figé");
     const skip = await delegation.recordSkipPublication(ticket, 3, other.id, "Pas de publication", "corr-skip");
     expect(skip.ok).toBe(false);
+  });
+
+  test("a publication refused before any post because the head moved is discarded so a new pass can start", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = storedReviewTicket();
+    startParentSession(sessionHub, ticket.id);
+    const passId = await completePass(delegation, system, ticket);
+    system.movedReviewHead = "f".repeat(40);
+
+    const published = await delegation.publishReview(ticket, 3, { passId }, "corr-moved");
+
+    expect(published.ok).toBe(false);
+    expect(published.result).toContain("avant tout envoi");
+    expect(store.getReviewPass(ticket.id)?.publicationIntent).toBeNull();
+
+    system.fingerprint = "code-v2";
+    const restarted = await delegation.startReview(ticket, 3, "quality", "new head diff");
+    expect(restarted.ok).toBe(true);
+    expect(store.getReviewPass(ticket.id)?.passId).not.toBe(passId);
   });
 
   test("closing without publication is recorded once and then blocks publication", async () => {

@@ -423,7 +423,7 @@ export function dependencyCandidates(
 /** Verb describing how a ticket ended, for the finished-at line. */
 export function finishedKindLabel(ticket: Pick<Ticket, "column" | "stage" | "reviewOutcome">): string {
   if (ticket.column === "merged") return "PR mergée";
-  if (ticket.column === "reviewed" && ticket.reviewOutcome === "closed_unpublished") return "PR reviewed (not published)";
+  if (ticket.column === "reviewed" && ticket.reviewOutcome === "closed_unpublished") return "PR revue (non publiée)";
   if (ticket.column === "reviewed") return "PR reviewed";
   if (ticket.column === "answered") return "Répondu";
   if (ticket.column === "done") return "Terminé";

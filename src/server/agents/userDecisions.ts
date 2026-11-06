@@ -1,32 +1,13 @@
-/**
- * Authorisation of backend actions backed by an explicit user instruction. A user comment (answer
- * or free comment, referenced by `comments.id`) authorises one precise action on one target of its
- * own review ticket, once, and every outcome is journaled. This guards against ordinary
- * misinterpretation by the agent; it is not a defence against a malicious local agent.
- */
-
 import type { Comment } from "../../shared/schemas.ts";
-import { USER_DECISION_APPLIED_EVENT, type Store } from "../db/store.ts";
-
-export const USER_DECISION_REFUSED_EVENT = "user_decision_refused";
-
-export const USER_DECISION_ACTIONS = {
-  rerunReview: "rerun_review",
-  dismissFinding: "dismiss_finding",
-  attachNote: "attach_note",
-  chooseVerdict: "choose_verdict",
-  skipPublication: "skip_publication",
-} as const;
-export type UserDecisionAction = (typeof USER_DECISION_ACTIONS)[keyof typeof USER_DECISION_ACTIONS];
+import { USER_DECISION_APPLIED_EVENT, USER_DECISION_REFUSED_EVENT, type UserDecisionAction } from "../db/reviewDecisions.ts";
+import type { Store } from "../db/store.ts";
 
 export interface UserDecisionRequest {
   ticketId: string;
   messageId: string;
   action: UserDecisionAction;
   target: string;
-  /** Creation time of the targeted result revision: the instruction must not predate it. */
   notBefore: number;
-  /** What the agent understood the user asked, journaled next to the user's own text. */
   interpretation: unknown;
 }
 
@@ -51,7 +32,6 @@ export function authorizeUserDecision(store: Store, request: UserDecisionRequest
   return { ok: true, comment };
 }
 
-/** Journal an applied decision: the user's own text, the interpreted action, its target and outcome. */
 export function recordUserDecision(store: Store, request: UserDecisionRequest, comment: Comment, outcome: string): void {
   store.logEvent(request.ticketId, USER_DECISION_APPLIED_EVENT, {
     messageId: request.messageId,
@@ -63,7 +43,6 @@ export function recordUserDecision(store: Store, request: UserDecisionRequest, c
   });
 }
 
-/** Journal a refused decision and build the explicit refusal returned to the agent. */
 export function refuseUserDecision(store: Store, request: Pick<UserDecisionRequest, "ticketId" | "messageId" | "action" | "target">, reason: string): { ok: false; result: string } {
   store.logEvent(request.ticketId, USER_DECISION_REFUSED_EVENT, {
     messageId: request.messageId,

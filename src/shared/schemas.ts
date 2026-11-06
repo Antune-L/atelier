@@ -391,7 +391,6 @@ export const ticketSchema = z.object({
   reviewFlags: z.array(z.enum(REVIEW_FLAGS)).optional(),
   stealthPrTitle: z.string().nullable().optional(),
   stealthPrBody: z.string().nullable().optional(),
-  /** Set when a review ticket ended differently from its configured publication (user decision). */
   reviewOutcome: z.enum(REVIEW_OUTCOMES).nullable().optional(),
   column: columnSchema,
   stage: stageSchema.nullable(),

@@ -55,6 +55,7 @@ import {
   buildCleanContract,
   buildConflictResolutionContract,
   buildReviewContract,
+  isReviewFixSession,
   buildTicketContract,
 } from "./contract.ts";
 import { buildImplementSessionConfig, codexImplementerKnobs } from "./sessionConfig.ts";
@@ -104,10 +105,7 @@ const MERGE_SKIPPED_REVIEW_LEVEL_HIGH_EVENT = "merge_skipped_review_level_high";
 /** Branch-name prefix of a standalone worktree session's fresh branch. */
 const WORKTREE_BRANCH_PREFIX = "worktree";
 
-/**
- * The review state the done gate expects: the frozen publication intent when one exists (never
- * recomputed), else what publish_review would post from the effective result.
- */
+/** Mirrors what publish_review actually posts: same kept findings, same event → same review state. */
 export function reviewPublicationState(reviewPass: ReviewPass | null): ReviewPublicationState | null {
   if (reviewPass?.publicationIntent) return reviewPass.publicationIntent.expectedState;
   const effective = effectiveReviewResult(reviewPass);
@@ -115,10 +113,6 @@ export function reviewPublicationState(reviewPass: ReviewPass | null): ReviewPub
   return REVIEW_PUBLICATION_STATE_BY_EVENT[effective.event];
 }
 
-/**
- * Only a recorded user decision skips the publication proof, and only while no publication was ever
- * frozen (the decision path refuses both together). Completeness and head checks still apply.
- */
 function reviewSkipsPublication(reviewPass: ReviewPass | null): boolean {
   return reviewPass !== null && !reviewPass.userStateCorrupt && reviewPass.decisions.skipPublication !== null
     && reviewPass.publicationIntent === null && reviewPass.publishedReviewId === null;
@@ -1414,7 +1408,9 @@ export class SlotManager {
 
   /** Whether buildContractPayload renders the feature contract, which already lists the ticket's comments. */
   private contractCarriesComments(ticket: Ticket): boolean {
-    return !ticket.resolvingConflicts && ticket.kind === "feature" && this.store.getActiveQualityIteration(ticket.id)?.mode !== "correction";
+    if (ticket.resolvingConflicts) return false;
+    if (ticket.kind === "review") return !isReviewFixSession(ticket);
+    return ticket.kind === "feature" && this.store.getActiveQualityIteration(ticket.id)?.mode !== "correction";
   }
 
   private buildContractPayload(ticket: Ticket): string {
@@ -1424,7 +1420,7 @@ export class SlotManager {
       const baseBranch = resolveExecutionBaseBranch(ticket, project, this.store);
       return buildConflictResolutionContract(ticket, { commitLanguage, baseBranch });
     }
-    if (ticket.kind === "review") return buildReviewContract(ticket, { commitLanguage });
+    if (ticket.kind === "review") return buildReviewContract(ticket, { commitLanguage, comments: this.store.listComments(ticket.id) });
     if (ticket.kind === "clean") return buildCleanContract(ticket, { commitLanguage });
     if (ticket.kind === "ask") return buildAskContract(ticket);
     // A child ticket stacks on its parent's branch: the PR target must match the worktree fork point

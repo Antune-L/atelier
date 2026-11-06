@@ -604,6 +604,10 @@ export class FakeSystemAdapter implements SystemAdapter {
     provider: VcsProvider,
   ): Promise<PublishReviewResult> {
     this.log("publishReview", { slotPath, prUrl, ...opts });
+    const current = await this.readReviewHead(slotPath, prUrl, provider);
+    if (!current.ok || current.commitSha !== opts.expectedCommitSha) {
+      return { ok: false, reason: current.ok ? "la PR a avancé depuis cette passe" : current.reason, reviewId: null, notPosted: true };
+    }
     return this.vcs(provider).publishReview(slotPath, prUrl, opts);
   }
 

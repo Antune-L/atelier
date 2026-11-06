@@ -48,7 +48,7 @@ import { createAutonomousSessionGuard } from "./autonomousSessionGuard.ts";
 import { AutonomousPartialDelivery } from "./autonomousPartialDelivery.ts";
 import { isFirstFeatureDelivery } from "./prDescription.ts";
 import { buildRecoveryContext, recoveryStage } from "./recoveryContext.ts";
-import { effectiveReviewResult } from "./reviewPass.ts";
+import { effectiveReviewResult, reviewPassMarker } from "./reviewPass.ts";
 import { assertExecutionAvailable, resolveTicketExecution, type ResolvedExecution } from "./executionConfig.ts";
 import {
   buildAskContract,
@@ -1626,7 +1626,7 @@ export class SlotManager {
       const publishes = ticket.postComments && !reviewSkipsPublication(reviewPass);
       return this.system.verifyReviewDone(path, prUrl, {
         requirePostedSince: publishes ? ticket.createdAt : null,
-        publicationMarker: publishes && reviewPass ? intent?.marker ?? `<!-- kanban-review-pass:${reviewPass.passId} -->` : null,
+        publicationMarker: publishes && reviewPass ? intent?.marker ?? reviewPassMarker(reviewPass.passId) : null,
         expectedCommitSha: reviewPass?.publishedCommitSha ?? intent?.commitSha ?? reviewPass?.reviewedCommitSha ?? null,
         publishedReviewId: reviewPass?.publishedReviewId ?? null,
         expectedReviewState: reviewPublicationState(reviewPass),

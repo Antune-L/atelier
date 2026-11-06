@@ -27,6 +27,10 @@ export function requiredReviewKinds(depth: ReviewDepth): readonly ReviewKind[] {
   return depth === "full" ? FULL_REVIEW_KINDS : LIGHT_REVIEW_KINDS;
 }
 
+export function reviewPassMarker(passId: string): string {
+  return `<!-- kanban-review-pass:${passId} -->`;
+}
+
 /**
  * Every required dimension of the pass, flattened with the dimension that reported it. `null` when
  * one of them is missing or not completed: extra dimensions the pass happens to hold are ignored,

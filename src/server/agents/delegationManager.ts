@@ -36,7 +36,7 @@ import {
   type DimensionFinding,
   type FindingRenderStyle,
 } from "./reviewFindings.ts";
-import { allowedReviewPasses, applyUserDismissals, effectiveReviewResult, passDimensionFindings, requiredReviewKinds, withUnreviewedChangesSection } from "./reviewPass.ts";
+import { allowedReviewPasses, applyUserDismissals, effectiveReviewResult, passDimensionFindings, requiredReviewKinds, reviewPassMarker, withUnreviewedChangesSection } from "./reviewPass.ts";
 import type { DismissedFinding, EffectiveReviewResult, UnreviewedChanges } from "./reviewPass.ts";
 import { authorizeUserDecision, recordUserDecision, refuseUserDecision } from "./userDecisions.ts";
 import type { UserDecisionRequest } from "./userDecisions.ts";
@@ -1635,7 +1635,7 @@ export class DelegationManager {
       };
     }
     const { messageId } = args;
-    const decides = args.dismiss !== undefined || args.note !== undefined || args.verdict !== undefined;
+    const decides = publicationDecisionAction(args) !== null;
     const validated = messageId === undefined || !decides ? null : this.validatePublicationDecisions(currentPass, { ...args, messageId });
     if (validated !== null && !validated.ok) return validated;
     const decidedPass = validated === null ? currentPass : { ...currentPass, decisions: validated.decisions };
@@ -1648,7 +1648,7 @@ export class DelegationManager {
     const intent: ReviewPublicationIntent = {
       passId: currentPass.passId,
       commitSha: reviewedCommitSha,
-      marker: `<!-- kanban-review-pass:${currentPass.passId} -->`,
+      marker: reviewPassMarker(currentPass.passId),
       body: provider === "azureDevops" && effective.event === "APPROVE" && !hasUserContent ? "" : report,
       comments: effective.findings.flatMap((finding) => {
         if (finding.path === null || finding.line === null) return [];
@@ -2405,16 +2405,7 @@ export class DelegationManager {
       depth: persisted.reviewDepth,
       execution: this.activeReviewPasses.get(ticket.id)?.execution ?? requestedExecution,
     };
-    const archive: ArchivedReviewResult = {
-      verdict: current.verdict,
-      summary: current.summary,
-      findings: current.findings,
-      verificationStatus: current.verificationStatus,
-      error: current.error,
-      createdAt: current.createdAt,
-      revision: current.revision,
-    };
-    return { ok: true, pass, archive, decision: { request: authorized, comment: check.comment } };
+    return { ok: true, pass, archive: current, decision: { request: authorized, comment: check.comment } };
   }
 
   private launchReviewer(input: {

@@ -160,6 +160,7 @@ function parsePersistedReviewFindings(value: string): ReviewFinding[] | null {
 
 const UNREADABLE_REVIEW_FINDINGS_ERROR = "findings persistés illisibles : relance cette dimension";
 const LEGACY_REVIEW_REVISION_PREFIX = "legacy-";
+const UNFROZEN_PASS_AT_DECISIONS_REVISION = "WHERE ticket_id = ? AND pass_id = ? AND publication_json IS NULL AND COALESCE(json_extract(decisions_json, '$.revision'), 0) = ?";
 
 export interface PersistedReviewResult {
   kind: ReviewKind;
@@ -1318,8 +1319,7 @@ export class Store {
   saveReviewDecisions(ticketId: string, passId: string, expectedRevision: number, decisions: ReviewPassDecisions): boolean {
     const result = this.db.query(
       `UPDATE review_passes SET decisions_json = ?
-       WHERE ticket_id = ? AND pass_id = ? AND publication_json IS NULL
-         AND COALESCE(json_extract(decisions_json, '$.revision'), 0) = ?`,
+       ${UNFROZEN_PASS_AT_DECISIONS_REVISION}`,
     ).run(JSON.stringify(reviewPassDecisionsSchema.parse(decisions)), ticketId, passId, expectedRevision);
     return result.changes === 1;
   }
@@ -1327,8 +1327,7 @@ export class Store {
   freezeReviewPublication(ticketId: string, intent: ReviewPublicationIntent): boolean {
     const result = this.db.query(
       `UPDATE review_passes SET publication_json = ?
-       WHERE ticket_id = ? AND pass_id = ? AND publication_json IS NULL
-         AND COALESCE(json_extract(decisions_json, '$.revision'), 0) = ?`,
+       ${UNFROZEN_PASS_AT_DECISIONS_REVISION}`,
     ).run(JSON.stringify(reviewPublicationIntentSchema.parse(intent)), ticketId, intent.passId, intent.decisionsRevision);
     return result.changes === 1;
   }

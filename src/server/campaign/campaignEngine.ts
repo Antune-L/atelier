@@ -105,7 +105,7 @@ export class CampaignEngine {
 
   /** Schedule a pass; wakes received before it starts coalesce into it. */
   wake(): void {
-    if (this.wakePending) return;
+    if (this.timer === null || this.wakePending) return;
     this.wakePending = true;
     void this.tick();
   }
@@ -114,7 +114,11 @@ export class CampaignEngine {
   tick(): Promise<void> {
     this.chain = this.chain.then(async () => {
       this.wakePending = false;
-      await this.pass();
+      try {
+        await this.pass();
+      } catch (error) {
+        log.error("campaign pass failed", { error: getErrorMessage(error) });
+      }
     });
     return this.chain;
   }
@@ -182,7 +186,7 @@ export class CampaignEngine {
     this.syncCards(campaign, plan);
     await this.repairCards(campaign);
     await this.mergeCards(campaign, project, mother);
-    this.enforceBudgets(campaign, plan);
+    await this.enforceBudgets(campaign, plan);
     await this.startReadyCards(campaign, plan);
   }
 
@@ -219,11 +223,16 @@ export class CampaignEngine {
     if (SETTLED_CARD_STATES.includes(card.state)) return;
     this.store.campaigns.updateCard(campaign.id, cardId, { state: "blocked", blockedReason: reason }, this.now());
     this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.cardBlocked, { cardId, reason });
+    this.blockDescendants(campaign, plan, cardId, "blocked");
+  }
+
+  private blockDescendants(campaign: Campaign, plan: CampaignPlan, cardId: string, state: "blocked" | "stopped"): void {
+    const reason = `Prerequisite ${cardId} is ${state}.`;
     for (const descendant of campaignDescendants(plan.cards, [cardId])) {
       const child = this.store.campaigns.getCard(campaign.id, descendant);
       if (!child || SETTLED_CARD_STATES.includes(child.state) || child.state === "running") continue;
-      this.store.campaigns.updateCard(campaign.id, descendant, { state: "blocked", blockedReason: `Prerequisite ${cardId} is blocked.` }, this.now());
-      this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.cardBlocked, { cardId: descendant, reason: `Prerequisite ${cardId} is blocked.` });
+      this.store.campaigns.updateCard(campaign.id, descendant, { state: "blocked", blockedReason: reason }, this.now());
+      this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.cardBlocked, { cardId: descendant, reason });
     }
   }
 
@@ -243,6 +252,7 @@ export class CampaignEngine {
       }
       if (ticket.column === "abandoned") {
         this.store.campaigns.updateCard(campaign.id, card.cardId, { state: "stopped", blockedReason: "The card was abandoned." }, this.now());
+        this.blockDescendants(campaign, plan, card.cardId, "stopped");
         continue;
       }
       if (card.state === "blocked") continue;
@@ -387,12 +397,17 @@ export class CampaignEngine {
   }
 
   /** Sub-budget per card and the envelope minus the final reserve (FR5). */
-  private enforceBudgets(campaign: Campaign, plan: CampaignPlan): void {
+  private async enforceBudgets(campaign: Campaign, plan: CampaignPlan): Promise<void> {
     for (const card of this.store.campaigns.listCards(campaign.id)) {
       const planCard = plan.cards.find((entry) => entry.id === card.cardId);
       if (!planCard || !ACTIVE_CARD_STATES.includes(card.state) || card.tokensUsed <= planCard.budgetTokens) continue;
-      if (card.ticketId !== null) void this.deps.slots.interruptForCampaign(card.ticketId, "Campaign card sub-budget exhausted.");
       this.block(campaign, plan, card.cardId, `Sub-budget exhausted (${card.tokensUsed} / ${planCard.budgetTokens} tokens).`);
+      if (card.ticketId === null) continue;
+      try {
+        await this.deps.slots.interruptForCampaign(card.ticketId, "Campaign card sub-budget exhausted.");
+      } catch (error) {
+        log.warn("campaign card interruption failed", { campaignId: campaign.id, cardId: card.cardId, error: getErrorMessage(error) });
+      }
     }
   }
 

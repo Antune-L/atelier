@@ -182,7 +182,7 @@ export class CampaignEngine {
         this.updateRuntime(campaign.id, (runtime) => ({ ...runtime, reconciledAt: this.now(), reconciliationError: null }));
       } catch (error) {
         const message = getErrorMessage(error);
-        this.store.campaigns.update(campaign.id, { status: "unknown", runtime: { ...campaign.runtime, previousStatus: campaign.status, reconciliationError: message, statusReason: `Reconciliation after restart failed: ${message}` } }, this.now());
+        this.store.campaigns.update(campaign.id, { status: "unknown", runtime: { ...campaign.runtime, statusBeforeUnknown: campaign.status, reconciliationError: message, statusReason: `Reconciliation after restart failed: ${message}` } }, this.now());
         this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.reconciliationFailed, { message });
       }
     }
@@ -362,7 +362,13 @@ export class CampaignEngine {
         this.store.campaigns.completeOperation(operation.id, "failed", { reason: "finalization started" }, this.now());
         continue;
       }
-      const snapshot = await this.deps.vcs.readPr(project.repoPath, ticket.prUrl, project.vcsProvider);
+      let snapshot: PrSnapshot;
+      try {
+        snapshot = await this.deps.vcs.readPr(project.repoPath, ticket.prUrl, project.vcsProvider);
+      } catch (error) {
+        log.warn("pending merge left unconfirmed at finalization", { campaignId, operationId: operation.id, error: getErrorMessage(error) });
+        continue;
+      }
       if (snapshot.state === "merged" && snapshot.baseBranch === campaign.motherBranch) {
         this.store.campaigns.completeOperation(operation.id, "done", { mergeCommitSha: snapshot.mergeCommitSha, reconciled: true }, this.now());
         await this.deps.slots.markMerged(ticket.id);
@@ -898,11 +904,11 @@ export class CampaignEngine {
     this.deps.notify(notification.title, notification.body);
   }
 
-  /** Stop starts and merges; a merge already emitted finishes first because passes are serialized (FR12). */
   private assertStarted(): void {
     if (this.timer === null) throw new Error("Campaign execution is not started yet on this machine.");
   }
 
+  /** Stop starts and merges; a merge already emitted finishes first because passes are serialized (FR12). */
   async requestPause(campaignId: string): Promise<Campaign> {
     this.assertStarted();
     const campaign = this.store.campaigns.require(campaignId);
@@ -946,7 +952,7 @@ export class CampaignEngine {
     const campaign = this.store.campaigns.require(campaignId);
     if (campaign.status === "unknown") {
       this.reconcilePending = true;
-      this.store.campaigns.update(campaignId, { status: campaign.runtime.previousStatus ?? "running", runtime: { ...campaign.runtime, previousStatus: null, reconciliationError: null, statusReason: null } }, this.now());
+      this.store.campaigns.update(campaignId, { status: campaign.runtime.statusBeforeUnknown ?? "running", runtime: { ...campaign.runtime, statusBeforeUnknown: null, reconciliationError: null, statusReason: null } }, this.now());
       await this.tick();
       return this.store.campaigns.require(campaignId);
     }
@@ -960,7 +966,13 @@ export class CampaignEngine {
     const extensions = extension === null ? campaign.runtime.extensions : [...campaign.runtime.extensions, { ...extension, at: now }];
     const reopen = campaign.status !== "paused";
     const oldPreview = campaign.runtime.finalization?.previewId ?? null;
-    if (reopen && oldPreview !== null && campaign.runtime.finalization?.previewCleanup !== "done") await this.deps.preview.stop(oldPreview);
+    if (reopen && oldPreview !== null && campaign.runtime.finalization?.previewCleanup !== "done") {
+      try {
+        await this.deps.preview.stop(oldPreview);
+      } catch (error) {
+        log.warn("previous final preview could not be stopped on reopen", { campaignId, previewId: oldPreview, error: getErrorMessage(error) });
+      }
+    }
     const status = reopen ? "running" : campaign.runtime.previousStatus === "finalizing" ? "finalizing" : "running";
     this.store.campaigns.update(campaignId, {
       status,

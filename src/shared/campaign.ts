@@ -417,6 +417,7 @@ export type CampaignReadiness = z.infer<typeof campaignReadinessSchema>;
 export const campaignRuntimeSchema = z.object({
   statusReason: z.string().nullable().default(null),
   previousStatus: z.enum(CAMPAIGN_STATUSES).nullable().default(null),
+  statusBeforeUnknown: z.enum(CAMPAIGN_STATUSES).nullable().default(null),
   pauseRequestedAt: timestampSchema.nullable().default(null),
   quotaPause: campaignQuotaPauseSchema.nullable().default(null),
   quotaPausedMs: z.number().int().nonnegative().default(0),

@@ -567,6 +567,78 @@ CREATE TABLE IF NOT EXISTS prd_documents (
   UNIQUE(conversation_id, revision)
 );
 
+CREATE TABLE IF NOT EXISTS campaigns (
+  id TEXT PRIMARY KEY,
+  project TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'planning',
+  current_version INTEGER NOT NULL DEFAULT 0,
+  approved_version INTEGER,
+  approved_at INTEGER,
+  mother_branch TEXT,
+  base_branch TEXT,
+  final_ticket_id TEXT,
+  runtime_json TEXT NOT NULL DEFAULT '{}',
+  report_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS campaign_versions (
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id),
+  version INTEGER NOT NULL,
+  plan_json TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  skills_json TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (campaign_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS campaign_cards (
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id),
+  card_id TEXT NOT NULL,
+  ticket_id TEXT UNIQUE,
+  state TEXT NOT NULL DEFAULT 'pending',
+  plan_version INTEGER NOT NULL,
+  pr_url TEXT,
+  merge_sha TEXT,
+  tokens_used INTEGER NOT NULL DEFAULT 0,
+  repairs_json TEXT NOT NULL DEFAULT '[]',
+  blocked_reason TEXT,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (campaign_id, card_id)
+);
+
+CREATE TABLE IF NOT EXISTS campaign_operations (
+  id TEXT PRIMARY KEY,
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id),
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'intent',
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  result_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS campaign_events (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id),
+  type TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS campaign_commands (
+  request_id TEXT PRIMARY KEY,
+  command TEXT NOT NULL,
+  campaign_id TEXT,
+  result_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_campaigns_project ON campaigns(project, status);
+CREATE INDEX IF NOT EXISTS idx_campaign_operations_campaign ON campaign_operations(campaign_id, status);
+CREATE INDEX IF NOT EXISTS idx_campaign_events_campaign ON campaign_events(campaign_id, seq);
 CREATE INDEX IF NOT EXISTS idx_comments_ticket ON comments(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project, updated_at);
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation ON conversation_messages(conversation_id, created_at);

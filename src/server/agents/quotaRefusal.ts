@@ -3,7 +3,8 @@ import type { QuotaProvider } from "../../shared/providerQuota.ts";
 import type { AgentSessionEvent } from "../system/agentSession.ts";
 
 const CLAUDE_REJECTED_STATUS = "rejected";
-const QUOTA_ERROR_PATTERN = /usage limit|rate[ _-]?limit|quota|too many requests|\b429\b|insufficient_quota/i;
+// NOTE(ali): Narrow on purpose: a false positive pauses every running card. Widen only from captured real provider messages.
+const QUOTA_ERROR_PATTERN = /usage limit|insufficient_quota|quota (?:exceeded|exhausted)|hit your (?:usage )?limit/i;
 
 export interface QuotaRefusal {
   provider: QuotaProvider;

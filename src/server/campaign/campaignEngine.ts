@@ -277,6 +277,7 @@ export class CampaignEngine {
     const mother = campaign.motherBranch;
     if (base === null || mother === null) throw new Error("The campaign has no mother or base branch.");
     await this.suspendRunningCards(campaignId, "finalization started; the pull request stays open.");
+    await this.stopIdleCardSessions(campaignId, "Campaign finalization started.");
     const cards = this.store.campaigns.listCards(campaignId);
     const merged = cards.filter((card) => card.state === "merged");
     const missing = plan.cards.filter((entry) => !merged.some((card) => card.cardId === entry.id)).map((entry) => `${entry.id}: ${entry.title}`);
@@ -306,7 +307,7 @@ export class CampaignEngine {
     const skills = readCampaignSkills(this.deps.skillRoots);
     const guidance = skills.map((fingerprint) => ({ name: fingerprint.name, fingerprint, instructions: readSkillInstructions(fingerprint.name, this.deps.skillRoots) }));
     const description = campaignFinalDescription(plan, mother, base, missing, guidance);
-    const { ticket } = this.store.createTicketIdempotent(`campaign:${campaignId}:final:${campaign.runtime.extensions.length}`, JSON.stringify({ campaign: campaignId, final: campaign.runtime.extensions.length }), campaignFinalTicket(plan, base, description, incomplete, now), (created) => {
+    const { ticket } = this.store.createTicketIdempotent(`campaign:${campaignId}:final:${campaign.runtime.extensions.length}`, JSON.stringify({ campaign: campaignId, final: campaign.runtime.extensions.length }), campaignFinalTicket(plan, base, description, incomplete, now, effectiveSchedule(plan, campaign.runtime).reportAt), (created) => {
       this.store.campaigns.update(campaignId, { status: "finalizing", finalTicketId: created.id, runtime: { ...campaign.runtime, finalization: { ...finalization, prDraft: incomplete } } }, now);
     });
     this.event(campaignId, CAMPAIGN_ENGINE_EVENT.finalizationStarted, { reason, ticketId: ticket.id, merged: merged.length, total: plan.cards.length });
@@ -435,6 +436,15 @@ export class CampaignEngine {
   private async suspendCard(campaign: Campaign, card: CampaignCard, reason: string): Promise<void> {
     if (card.ticketId !== null) await this.deps.slots.interruptForCampaign(card.ticketId, reason);
     this.store.campaigns.updateCard(campaign.id, card.cardId, { state: "suspended", blockedReason: `${PAUSED_CARD_PREFIX} ${reason}` }, this.now());
+  }
+
+  private async stopIdleCardSessions(campaignId: string, reason: string): Promise<void> {
+    for (const card of this.store.campaigns.listCards(campaignId)) {
+      if (card.ticketId === null || card.state === "running") continue;
+      const ticket = this.store.getTicket(card.ticketId);
+      if (ticket?.column !== "implementing" || ticket.stage === "interrupted") continue;
+      await this.deps.slots.interruptForCampaign(card.ticketId, reason);
+    }
   }
 
   async suspendRunningCards(campaignId: string, reason: string): Promise<number> {
@@ -859,6 +869,7 @@ export class CampaignEngine {
       return this.store.campaigns.require(campaignId);
     }
     await this.suspendRunningCards(campaignId, "campaign cancelled.");
+    await this.stopIdleCardSessions(campaignId, "Campaign cancelled.");
     if (campaign.finalTicketId !== null) await this.deps.slots.interruptForCampaign(campaign.finalTicketId, "Campaign cancelled.");
     this.event(campaignId, CAMPAIGN_ENGINE_EVENT.cancelled);
     this.produceReport(campaignId, "cancelled");

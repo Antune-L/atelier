@@ -534,7 +534,6 @@ export const campaignReportSchema = z.object({
 });
 export type CampaignReport = z.infer<typeof campaignReportSchema>;
 
-
 export interface EffectiveSchedule {
   deadlineAt: number;
   reportAt: number;

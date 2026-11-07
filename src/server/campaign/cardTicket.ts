@@ -159,8 +159,8 @@ export function campaignFinalDescription(plan: CampaignPlan, motherBranch: strin
   ].join("\n");
 }
 
-export function campaignFinalTicket(plan: CampaignPlan, baseBranch: string, description: string, draft: boolean, now: number): NewTicket {
-  const minutesToReport = Math.floor((Date.parse(plan.schedule.reportAt) - now) / MINUTE_MS);
+export function campaignFinalTicket(plan: CampaignPlan, baseBranch: string, description: string, draft: boolean, now: number, reportAt: number): NewTicket {
+  const minutesToReport = Math.floor((reportAt - now) / MINUTE_MS);
   const timeout = Math.min(MAX_FINAL_TIMEOUT_MINUTES, Math.max(MIN_FINAL_TIMEOUT_MINUTES, minutesToReport));
   return {
     ...campaignCardTicket(plan, { id: "final", title: `Finalize: ${plan.title}`, description, dependsOn: [], budgetTokens: plan.budget.finalReserveTokens, criteria: [] }, baseBranch, description),

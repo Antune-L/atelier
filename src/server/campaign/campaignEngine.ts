@@ -224,6 +224,7 @@ export class CampaignEngine {
   private async resumeOnePausedCard(campaign: Campaign): Promise<boolean> {
     const card = this.store.campaigns.listCards(campaign.id).find((entry) => entry.state === "suspended" && (entry.blockedReason ?? "").startsWith(PAUSED_CARD_PREFIX));
     if (!card || card.ticketId === null) return false;
+    if (this.store.campaigns.require(campaign.id).status !== "running") return true;
     this.store.campaigns.updateCard(campaign.id, card.cardId, { state: "running", blockedReason: null }, this.now());
     try {
       await this.deps.slots.retry(card.ticketId);
@@ -380,6 +381,7 @@ export class CampaignEngine {
     const plan = this.approvedPlan(campaign);
     for (const card of this.store.campaigns.listCards(campaign.id)) {
       if (card.ticketId === null || card.state !== "running") continue;
+      if (this.store.campaigns.require(campaign.id).status !== "running") return;
       const ticket = this.store.getTicket(card.ticketId);
       if (!ticket) continue;
       const failed = ticket.column === "failed" || ticket.stage === "stalled" || (ticket.stage === "interrupted" && ticket.slotId !== null);

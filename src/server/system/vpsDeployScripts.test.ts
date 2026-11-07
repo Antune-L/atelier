@@ -4,6 +4,7 @@ import { join } from "node:path";
 const VPS_DIR = join(import.meta.dir, "../../../deploy/vps");
 const RELEASE = join(VPS_DIR, "kanban-release.sh");
 const UPGRADE = join(VPS_DIR, "kanban-upgrade.sh");
+const BOOTSTRAP = join(VPS_DIR, "kanban-bootstrap.sh");
 const SCRIPTS = [RELEASE, UPGRADE];
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const EXIT_USAGE = 64;
@@ -17,6 +18,10 @@ async function runBash(args: string[]): Promise<{ code: number; stderr: string }
 describe("VPS deploy scripts", () => {
   test.each(SCRIPTS)("%s parses with bash -n", async (script) => {
     expect(await runBash(["-n", script])).toEqual({ code: 0, stderr: "" });
+  });
+
+  test("kanban-bootstrap.sh parses with bash -n", async () => {
+    expect(await runBash(["-n", BOOTSTRAP])).toEqual({ code: 0, stderr: "" });
   });
 
   test.skipIf(Bun.which("shellcheck") === null).each(SCRIPTS)("%s passes shellcheck", async (script) => {
@@ -34,6 +39,7 @@ describe("VPS deploy scripts", () => {
     [UPGRADE, ["--sha"]],
     [UPGRADE, ["--sha", "abc"]],
     [UPGRADE, ["--unknown"]],
+    [BOOTSTRAP, ["--sha", SHA, "--with-campaigns"]],
   ])("%s %p is refused as bad usage", async (script, args) => {
     expect((await runBash([script, ...args])).code).toBe(EXIT_USAGE);
   });

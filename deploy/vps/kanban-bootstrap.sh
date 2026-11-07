@@ -98,6 +98,7 @@ Sets up the VPS from the reviewed commit, or only checks it with --check. A seco
   --mcp-aud <aud>                AUD tag of the MCP Access application.
   --with-previews                Install the Phase B preview broker, its cleanup helper and Chrome.
   --broker-config-stdin          Read the broker config.json on stdin (only with --with-previews). Never printed.
+  --with-campaigns               Install the autonomous campaign settings (needs --with-previews).
 EOF
   exit "$EXIT_USAGE"
 }
@@ -116,6 +117,7 @@ mcp_port=""
 team_domain=""
 mcp_aud=""
 with_previews=0
+with_campaigns=0
 broker_config_stdin=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -139,6 +141,7 @@ while [[ $# -gt 0 ]]; do
     --coolify-lock-ports) coolify_lock_ports=1 && shift ;;
     --tunnel-token-stdin) token_stdin=1 && shift ;;
     --with-previews) with_previews=1 && shift ;;
+    --with-campaigns) with_campaigns=1 && shift ;;
     --broker-config-stdin) broker_config_stdin=1 && shift ;;
     *) usage ;;
   esac
@@ -161,7 +164,7 @@ fi
 if [[ $apply -eq 0 && ($token_stdin -eq 1 || -n "$token_file" || $broker_config_stdin -eq 1) ]]; then
   usage
 fi
-if [[ ($token_stdin -eq 1 || -n "$token_file") && -z "$board_host" ]] || [[ $broker_config_stdin -eq 1 && $with_previews -eq 0 ]]; then
+if [[ ($token_stdin -eq 1 || -n "$token_file") && -z "$board_host" ]] || [[ ($broker_config_stdin -eq 1 || $with_campaigns -eq 1) && $with_previews -eq 0 ]]; then
   usage
 fi
 if [[ $EUID -ne 0 ]]; then
@@ -831,6 +834,31 @@ stage_previews() {
   report warning Previews "Coolify side" "API enabled, IP allowlist, token, source and board settings stay manual (docs/vps-bootstrap.md)"
 }
 
+stage_campaigns() {
+  if [[ $with_campaigns -eq 0 ]]; then
+    report skipped Campaigns "settings" "no --with-campaigns"
+    return 0
+  fi
+  ensure_unit_file deploy/vps/kanban.service.d/campaigns.conf /etc/systemd/system/kanban.service.d/campaigns.conf Campaigns restart_kanban
+}
+
+# Prints what the service actually runs with: memory limit, drop-ins and campaign settings from the units or the env file (an upgrade never reinstalls drop-ins).
+effective_config() {
+  local memory_max drop_ins environment key value
+  memory_max="$(systemctl show "$SERVICE" -p MemoryMax --value 2>/dev/null || true)"
+  drop_ins="$(systemctl show "$SERVICE" -p DropInPaths --value 2>/dev/null || true)"
+  environment="$(systemctl show "$SERVICE" -p Environment --value 2>/dev/null || true)"
+  report ok Config "MemoryMax" "${memory_max:-unknown}"
+  report ok Config "drop-ins" "${drop_ins:-none}"
+  for key in KANBAN_AUTONOMOUS_PILOT KANBAN_MAX_IMPLEMENTERS KANBAN_IMPLEMENTER_MEMORY_MB KANBAN_MEMORY_RESERVE_MB KANBAN_MIN_FREE_DISK_MB KANBAN_PREVIEW_MAX_ACTIVE; do
+    value="$(tr ' ' '\n' <<<"$environment" | sed -n "s/^$key=//p" | tail -n 1)"
+    [[ -n "$value" ]] || value="$(env_value "$key")"
+    report ok Config "$key" "${value:-default}"
+  done
+  value="$(env_value KANBAN_SLOTS)"
+  report ok Config "KANBAN_SLOTS" "${value:-default}"
+}
+
 # Prints the running work and fails when anything runs or the check itself fails (kanban-upgrade --check-idle).
 running_work() {
   local output status=0
@@ -977,9 +1005,11 @@ check_logins
 stage_access
 stage_mcp
 stage_previews
+stage_campaigns
 stage_coolify_ports
 apply_services
 final_checks
+effective_config
 
 echo
 echo "Manual steps: Google OAuth client, provider logins, Coolify token and source, Access MFA enrollment, qualification (docs/vps-bootstrap.md)."

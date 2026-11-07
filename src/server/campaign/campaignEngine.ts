@@ -239,7 +239,7 @@ export class CampaignEngine {
     const cards = this.store.campaigns.listCards(campaign.id).filter((card) => plan.cards.some((entry) => entry.id === card.cardId));
     if (cards.length === plan.cards.length && cards.every((card) => card.state === "merged")) return "all_merged";
     if (this.now() >= Date.parse(plan.schedule.deadlineAt)) return "deadline";
-    const active = cards.some((card) => ACTIVE_CARD_STATES.includes(card.state) || (card.state === "suspended" && (card.blockedReason ?? "").startsWith(PAUSED_CARD_PREFIX)));
+    const active = cards.some((card) => ACTIVE_CARD_STATES.includes(card.state) || card.state === "suspended");
     if (active) return null;
     if (this.envelopeRemaining(campaign, plan) <= 0) return "budget";
     const startable = cards.some((card) => {
@@ -400,9 +400,9 @@ export class CampaignEngine {
       error = preview.error ?? "Preview cleanup failed.";
     } else if (finalization.previewCleanup === null) {
       const operationId = `preview-stop:${campaignId}:${finalization.previewId}`;
-      const { created } = this.store.campaigns.beginOperation(campaignId, operationId, "stop_preview", { previewId: finalization.previewId }, this.now());
+      const { operation } = this.store.campaigns.beginOperation(campaignId, operationId, "stop_preview", { previewId: finalization.previewId }, this.now());
       try {
-        if (created) await this.deps.preview.stop(finalization.previewId);
+        if (operation.status !== "done") await this.deps.preview.stop(finalization.previewId);
         this.store.campaigns.completeOperation(operationId, "done", {}, this.now());
       } catch (stopError) {
         this.store.campaigns.completeOperation(operationId, "failed", { reason: getErrorMessage(stopError) }, this.now());

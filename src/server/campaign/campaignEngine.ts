@@ -1,7 +1,8 @@
 import { TERMINAL_CAMPAIGN_STATUSES, campaignDescendants } from "../../shared/campaign.ts";
-import type { Campaign, CampaignCard, CampaignCardPlan, CampaignPlan, CampaignRuntime } from "../../shared/campaign.ts";
+import type { Campaign, CampaignCard, CampaignCardPlan, CampaignFinalization, CampaignPlan, CampaignRuntime } from "../../shared/campaign.ts";
 import type { VcsProvider } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
+import type { PreviewRecord } from "../../shared/preview.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import type { Store } from "../db/store.ts";
 import { createLogger } from "../logger.ts";
@@ -12,7 +13,7 @@ import type { PrSnapshot } from "../system/vcs/types.ts";
 
 import { readCampaignSkills, readSkillInstructions } from "./campaignSkills.ts";
 import type { CampaignSkillRoots } from "./campaignSkills.ts";
-import { campaignCardDescription, campaignCardTicket, parseCampaignDecisions } from "./cardTicket.ts";
+import { campaignCardDescription, campaignCardTicket, campaignFinalDescription, campaignFinalTicket, parseCampaignDecisions } from "./cardTicket.ts";
 import { consumedTokens, defectFingerprint, isEnvironmentIncident } from "./policies.ts";
 import { quotaAvailability } from "./quotaAvailability.ts";
 
@@ -45,6 +46,11 @@ export const CAMPAIGN_ENGINE_EVENT = {
   quotaPaused: "quota_paused",
   quotaResumed: "quota_resumed",
   cardResumed: "card_resumed",
+  finalizationStarted: "finalization_started",
+  finalizationSkipped: "finalization_skipped",
+  finalPullRequest: "final_pull_request",
+  finalizationEnded: "finalization_ended",
+  previewCleanup: "preview_cleanup",
   error: "engine_error",
 } as const;
 
@@ -69,6 +75,13 @@ export interface CampaignVcs {
   mergePr(repoPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
 }
 
+export type CampaignPreviewState = Pick<PreviewRecord, "id" | "url" | "cleanupStatus" | "error">;
+
+export interface CampaignPreviews {
+  get(id: string): CampaignPreviewState | null;
+  stop(id: string): Promise<void>;
+}
+
 export interface CampaignEngineDeps {
   store: Store;
   slots: CampaignSlots;
@@ -79,6 +92,7 @@ export interface CampaignEngineDeps {
   readyToStart(campaign: Campaign): Promise<{ ready: boolean; reason: string | null }>;
   /** Observed provider quota; unknown or stale counts as unavailable (FR9). */
   quota(provider: QuotaProvider): Promise<ProviderQuota | null>;
+  preview: CampaignPreviews;
   now?(): number;
   onChange?(campaignId: string): void;
 }
@@ -138,6 +152,9 @@ export class CampaignEngine {
   private async pass(): Promise<void> {
     for (const campaign of this.store.campaigns.listQueued()) await this.guard(campaign.id, () => this.promote(campaign));
     for (const campaign of this.store.campaigns.listExecuting()) await this.guard(campaign.id, () => this.advance(campaign.id));
+    for (const campaign of this.store.campaigns.list()) {
+      if (campaign.runtime.finalization?.previewCleanup === "pending" || this.previewDue(campaign)) await this.guard(campaign.id, () => this.cleanupPreview(campaign.id));
+    }
   }
 
   private async guard(campaignId: string, run: () => Promise<void>): Promise<void> {
@@ -194,6 +211,10 @@ export class CampaignEngine {
       await this.advanceQuotaPause(campaign);
       return;
     }
+    if (campaign.status === "finalizing") {
+      await this.advanceFinalization(campaign);
+      return;
+    }
     if (campaign.status !== "running") return;
     const plan = this.approvedPlan(campaign);
     const project = this.deps.project(campaign.project);
@@ -203,8 +224,195 @@ export class CampaignEngine {
     await this.repairCards(campaign);
     await this.mergeCards(campaign, project, mother);
     await this.enforceBudgets(campaign, plan);
+    const reason = this.finalizationReason(this.store.campaigns.require(campaign.id), plan);
+    if (reason !== null) {
+      await this.beginFinalization(campaign.id, reason);
+      return;
+    }
     if (await this.resumeOnePausedCard(campaign)) return;
     await this.startReadyCards(campaign, plan);
+  }
+
+  /** All cards merged, the deadline reached, the budget spent, or nothing can progress any more (FR6, FR11). */
+  private finalizationReason(campaign: Campaign, plan: CampaignPlan): CampaignFinalization["reason"] | null {
+    if (campaign.status !== "running") return null;
+    const cards = this.store.campaigns.listCards(campaign.id).filter((card) => plan.cards.some((entry) => entry.id === card.cardId));
+    if (cards.length === plan.cards.length && cards.every((card) => card.state === "merged")) return "all_merged";
+    if (this.now() >= Date.parse(plan.schedule.deadlineAt)) return "deadline";
+    const active = cards.some((card) => ACTIVE_CARD_STATES.includes(card.state) || (card.state === "suspended" && (card.blockedReason ?? "").startsWith(PAUSED_CARD_PREFIX)));
+    if (active) return null;
+    if (this.envelopeRemaining(campaign, plan) <= 0) return "budget";
+    const startable = cards.some((card) => {
+      if (card.state !== "pending" && card.state !== "waiting_prerequisites") return false;
+      const planCard = plan.cards.find((entry) => entry.id === card.cardId);
+      return planCard !== undefined && planCard.dependsOn.every((dependency) => {
+        const prerequisite = this.store.campaigns.getCard(campaign.id, dependency);
+        return prerequisite !== null && prerequisite.state !== "blocked" && prerequisite.state !== "stopped";
+      });
+    });
+    return startable || cards.length < plan.cards.length ? null : "no_progress";
+  }
+
+  /** Adopt the existing mother branch with one final autonomous card; merges into the mother stop for good (FR6, FR7). */
+  private async beginFinalization(campaignId: string, reason: CampaignFinalization["reason"]): Promise<void> {
+    const campaign = this.store.campaigns.require(campaignId);
+    const plan = this.approvedPlan(campaign);
+    const base = campaign.baseBranch;
+    const mother = campaign.motherBranch;
+    if (base === null || mother === null) throw new Error("The campaign has no mother or base branch.");
+    await this.suspendRunningCards(campaignId, "finalization started; the pull request stays open.");
+    const cards = this.store.campaigns.listCards(campaignId);
+    const merged = cards.filter((card) => card.state === "merged");
+    const missing = plan.cards.filter((entry) => !merged.some((card) => card.cardId === entry.id)).map((entry) => `${entry.id}: ${entry.title}`);
+    const incomplete = missing.length > 0;
+    const now = this.now();
+    const finalization: CampaignFinalization = {
+      startedAt: now,
+      reason,
+      frozenRevision: null,
+      targetBranch: base,
+      prUrl: null,
+      prDraft: null,
+      previewUrl: null,
+      previewId: null,
+      previewKeepUntil: Date.parse(plan.schedule.reviewUntil),
+      previewCleanup: null,
+      previewCleanupError: null,
+      criteria: plan.globalCriteria.flatMap((criterion) => (criterion.id === undefined ? [] : [{ id: criterion.id, status: "missing" as const, evidence: null, revision: null }])),
+      reserveUsedTokens: 0,
+    };
+    const skip = merged.length === 0 ? "No change was merged into the mother branch; no pull request is opened." : incomplete && plan.partialDelivery === "report_only" ? "The campaign is incomplete and the plan asks for the report only." : null;
+    if (skip !== null) {
+      this.store.campaigns.update(campaignId, { status: "awaiting_report", runtime: { ...campaign.runtime, finalization, endedAt: now, statusReason: skip } }, now);
+      this.event(campaignId, CAMPAIGN_ENGINE_EVENT.finalizationSkipped, { reason, cause: skip });
+      return;
+    }
+    const skills = readCampaignSkills(this.deps.skillRoots);
+    const guidance = skills.map((fingerprint) => ({ name: fingerprint.name, fingerprint, instructions: readSkillInstructions(fingerprint.name, this.deps.skillRoots) }));
+    const description = campaignFinalDescription(plan, mother, base, missing, guidance);
+    const { ticket } = this.store.createTicketIdempotent(`campaign:${campaignId}:final`, JSON.stringify({ campaign: campaignId, final: true }), campaignFinalTicket(plan, base, description, incomplete, now), (created) => {
+      this.store.campaigns.update(campaignId, { status: "finalizing", finalTicketId: created.id, runtime: { ...campaign.runtime, finalization: { ...finalization, prDraft: incomplete } } }, now);
+    });
+    this.event(campaignId, CAMPAIGN_ENGINE_EVENT.finalizationStarted, { reason, ticketId: ticket.id, merged: merged.length, total: plan.cards.length });
+    await this.startFinalTicket(campaignId, ticket.id);
+  }
+
+  private async startFinalTicket(campaignId: string, ticketId: string): Promise<void> {
+    const operationId = `start-final:${campaignId}`;
+    const { operation } = this.store.campaigns.beginOperation(campaignId, operationId, "start_final", { ticketId }, this.now());
+    if (operation.status === "done") return;
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || ticket.column !== "todo") {
+      this.store.campaigns.completeOperation(operationId, "done", { reconciled: true }, this.now());
+      return;
+    }
+    try {
+      this.deps.slots.enqueue(ticketId);
+      await this.deps.slots.startTicket(ticketId);
+      this.store.campaigns.completeOperation(operationId, "done", {}, this.now());
+    } catch (error) {
+      this.store.campaigns.completeOperation(operationId, "failed", { reason: getErrorMessage(error) }, this.now());
+      this.endFinalization(campaignId, `The final card could not start: ${getErrorMessage(error)}`);
+    }
+  }
+
+  private endFinalization(campaignId: string, reason: string | null): void {
+    const campaign = this.store.campaigns.require(campaignId);
+    this.store.campaigns.update(campaignId, { status: "awaiting_report", runtime: { ...campaign.runtime, endedAt: this.now(), statusReason: reason } }, this.now());
+    this.event(campaignId, CAMPAIGN_ENGINE_EVENT.finalizationEnded, { reason });
+  }
+
+  /** Follow the final card: frozen revision, preview, final pull request and criteria proven on that exact revision (FR6). */
+  private async advanceFinalization(campaign: Campaign): Promise<void> {
+    const finalization = campaign.runtime.finalization;
+    const ticket = campaign.finalTicketId === null ? null : this.store.getTicket(campaign.finalTicketId);
+    if (finalization === null || ticket === null) {
+      this.endFinalization(campaign.id, "The final card is missing.");
+      return;
+    }
+    const plan = this.approvedPlan(campaign);
+    if (ticket.column === "todo") await this.startFinalTicket(campaign.id, ticket.id);
+    const state = ticket.autonomousState;
+    const preview = state?.previewId ? this.deps.preview.get(state.previewId) : null;
+    const reserveUsed = consumedTokens(ticket.sessionUsage);
+    const next: CampaignFinalization = {
+      ...finalization,
+      frozenRevision: state?.revision ?? finalization.frozenRevision,
+      previewId: preview?.id ?? finalization.previewId,
+      previewUrl: preview?.url ?? finalization.previewUrl,
+      reserveUsedTokens: reserveUsed,
+      criteria: this.criteriaResults(ticket, finalization),
+    };
+    const published = state?.phase === "completed" || state?.phase === "published_partial";
+    if (published && ticket.prUrl !== null) {
+      next.prUrl = ticket.prUrl;
+      next.prDraft = state?.phase === "published_partial" ? true : ticket.prDraft;
+    }
+    this.updateRuntime(campaign.id, (runtime) => ({ ...runtime, finalization: next }));
+    if (published && ticket.prUrl !== null) {
+      if (finalization.prUrl === null) this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.finalPullRequest, { prUrl: ticket.prUrl, draft: next.prDraft, revision: next.frozenRevision });
+      this.endFinalization(campaign.id, null);
+      return;
+    }
+    const terminal = ticket.column === "abandoned" || state?.phase === "publication_failed";
+    if (terminal) {
+      this.endFinalization(campaign.id, ticket.error ?? "The final card stopped without a pull request.");
+      return;
+    }
+    if (reserveUsed > plan.budget.finalReserveTokens || this.now() >= Date.parse(plan.schedule.reportAt)) {
+      const cause = reserveUsed > plan.budget.finalReserveTokens ? "The final reserve is exhausted." : "The report time arrived before the final pull request.";
+      await this.deps.slots.interruptForCampaign(ticket.id, cause);
+      this.endFinalization(campaign.id, cause);
+    }
+  }
+
+  /** Each global criterion with its proof on the frozen revision; inconclusive or missing proof counts as not validated (FR6). */
+  private criteriaResults(ticket: Ticket, finalization: CampaignFinalization): CampaignFinalization["criteria"] {
+    const revision = ticket.autonomousState?.revision ?? null;
+    const runId = ticket.autonomousState?.previewRunId ?? null;
+    if (revision === null || runId === null) return finalization.criteria.map((criterion) => ({ ...criterion, status: "missing", evidence: null, revision: null }));
+    const quality = this.store.getTicketQuality(ticket.id);
+    const run = quality.runs.find((entry) => entry.id === runId);
+    if (!run || run.simulated || run.revision !== revision) return finalization.criteria.map((criterion) => ({ ...criterion, status: "missing", evidence: null, revision: null }));
+    return finalization.criteria.map((criterion) => {
+      const evidence = quality.evidence.filter((entry) => entry.runId === runId && entry.criterionId === criterion.id).at(-1);
+      if (!evidence) return { ...criterion, status: "missing", evidence: null, revision: null };
+      return { ...criterion, status: evidence.status, evidence: evidence.artifactPath ?? evidence.summary, revision };
+    });
+  }
+
+  private previewDue(campaign: Campaign): boolean {
+    const finalization = campaign.runtime.finalization;
+    return finalization !== null && finalization.previewId !== null && finalization.previewCleanup === null && finalization.previewKeepUntil !== null && this.now() >= finalization.previewKeepUntil && campaign.status !== "finalizing";
+  }
+
+  /** Clean the kept preview after the review time; a failure is reported, never hidden (FR7). */
+  private async cleanupPreview(campaignId: string): Promise<void> {
+    const campaign = this.store.campaigns.require(campaignId);
+    const finalization = campaign.runtime.finalization;
+    if (finalization === null || finalization.previewId === null) return;
+    const preview = this.deps.preview.get(finalization.previewId);
+    let status: CampaignFinalization["previewCleanup"] = "pending";
+    let error: string | null = null;
+    if (preview === null || preview.cleanupStatus === "complete") status = "done";
+    else if (preview.cleanupStatus === "failed") {
+      status = "failed";
+      error = preview.error ?? "Preview cleanup failed.";
+    } else if (finalization.previewCleanup === null) {
+      const operationId = `preview-stop:${campaignId}:${finalization.previewId}`;
+      const { created } = this.store.campaigns.beginOperation(campaignId, operationId, "stop_preview", { previewId: finalization.previewId }, this.now());
+      try {
+        if (created) await this.deps.preview.stop(finalization.previewId);
+        this.store.campaigns.completeOperation(operationId, "done", {}, this.now());
+      } catch (stopError) {
+        this.store.campaigns.completeOperation(operationId, "failed", { reason: getErrorMessage(stopError) }, this.now());
+        status = "failed";
+        error = getErrorMessage(stopError);
+      }
+    }
+    if (status === finalization.previewCleanup) return;
+    this.updateRuntime(campaignId, (runtime) => ({ ...runtime, finalization: runtime.finalization === null ? null : { ...runtime.finalization, previewCleanup: status, previewCleanupError: error } }));
+    this.event(campaignId, CAMPAIGN_ENGINE_EVENT.previewCleanup, { status, error });
   }
 
   /** Stop a running card's sessions while keeping its worktree, branch and identity. */
@@ -568,13 +776,19 @@ export class CampaignEngine {
   }
 
   ownsMerge(ticketId: string): boolean {
-    return this.store.campaigns.getCardByTicket(ticketId) !== null;
+    return this.store.campaigns.getCardByTicket(ticketId) !== null || this.store.campaigns.findByFinalTicket(ticketId) !== null;
   }
 
   /** Refuses any start, even manual, of a campaign card whose prerequisites are not merged into the mother (FR3). */
   assertMayStart(ticket: Ticket): void {
     const card = this.store.campaigns.getCardByTicket(ticket.id);
-    if (!card) return;
+    if (!card) {
+      const owner = this.store.campaigns.findByFinalTicket(ticket.id);
+      if (owner === null) return;
+      if (owner.status !== "finalizing") throw new Error(`Campaign final card: the campaign is ${owner.status}; it runs only during finalization.`);
+      if (ticket.autonomousDelivery !== "pr_only") throw new Error("A campaign's final card delivers a pull request only; merge delivery is refused.");
+      return;
+    }
     const campaign = this.store.campaigns.require(card.campaignId);
     if (campaign.status !== "running") throw new Error(`Campaign card: the campaign is ${campaign.status}; cards start only while it runs.`);
     if (card.state === "blocked" || card.state === "suspended" || card.state === "stopped") throw new Error(`Campaign card ${card.cardId} is ${card.state}: ${card.blockedReason ?? ""}`.trim());

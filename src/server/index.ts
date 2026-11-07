@@ -437,7 +437,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     quota: (provider) => quotaService.read(provider),
     onChange: () => campaignEngine.wake(),
   });
-  const campaignEngine = buildCampaignEngine({ store, system, slots: slotManager, lifecycle, notifier, service: campaignService, sessionHub, quota: (provider) => quotaService.read(provider), dryRun: system.dryRun, dataRoot });
+  const campaignEngine = buildCampaignEngine({ store, system, slots: slotManager, lifecycle, notifier, service: campaignService, sessionHub, quota: (provider) => quotaService.read(provider), previews: previewManager, dryRun: system.dryRun, dataRoot });
   const configuredMcpToken = opts.mcpToken === undefined ? process.env.KANBAN_MCP_TOKEN : opts.mcpToken;
   const mcpToken = configuredMcpToken?.trim() || null;
   const publicMcpManager = mcpToken === null

@@ -118,3 +118,56 @@ export function campaignCardTicket(plan: CampaignPlan, card: CampaignCardPlan, m
     codexEffort: null,
   };
 }
+
+const MIN_FINAL_TIMEOUT_MINUTES = 30;
+const MAX_FINAL_TIMEOUT_MINUTES = 1440;
+const MINUTE_MS = 60_000;
+
+/** Brief of the final card: validate the adopted mother branch and open the pull request to the base (FR6, FR7). */
+export function campaignFinalDescription(plan: CampaignPlan, motherBranch: string, baseBranch: string, missingCards: readonly string[], guidance: readonly CardSkillGuidance[]): string {
+  const criteria = plan.globalCriteria.flatMap((criterion) => {
+    const { id, data, role, actions, observableResult, proofMethod } = criterion;
+    if (id === undefined || data === undefined || role === undefined || actions === undefined || observableResult === undefined || proofMethod === undefined) return [];
+    return [criterionBlock({ id, data, role, actions, observableResult, proofMethod })];
+  });
+  return [
+    `Finalize the campaign "${plan.title}".`,
+    "",
+    `The worktree is the existing campaign branch \`${motherBranch}\`: never create another branch, never merge anything into it except your own fixes. The pull request goes from \`${motherBranch}\` to \`${baseBranch}\` and is never merged automatically.`,
+    "",
+    "1. Freeze the revision you validate; every proof must name that exact commit.",
+    "2. Lightening pass following the simplifier guidance below, then an automatic review following the argus-review guidance, and fix what it reports.",
+    "3. Typecheck, lint and unit tests.",
+    "4. Submit the autonomous plan with exactly the global criteria below (same ids) and let the pipeline validate them on the preview of the frozen revision.",
+    "5. A failing criterion is fixed on this branch, then revalidated on the new revision.",
+    "",
+    "### Global criteria",
+    "",
+    criteria.join("\n"),
+    "",
+    "### Cards not merged into the campaign branch",
+    "",
+    listOrNone(missingCards),
+    "",
+    "### Exclusions",
+    "",
+    listOrNone(plan.exclusions),
+    "",
+    "## Skill guidance for this campaign",
+    "",
+    ...guidance.map(guidanceBlock),
+  ].join("\n");
+}
+
+export function campaignFinalTicket(plan: CampaignPlan, baseBranch: string, description: string, draft: boolean, now: number): NewTicket {
+  const minutesToReport = Math.floor((Date.parse(plan.schedule.reportAt) - now) / MINUTE_MS);
+  const timeout = Math.min(MAX_FINAL_TIMEOUT_MINUTES, Math.max(MIN_FINAL_TIMEOUT_MINUTES, minutesToReport));
+  return {
+    ...campaignCardTicket(plan, { id: "final", title: `Finalize: ${plan.title}`, description, dependsOn: [], budgetTokens: plan.budget.finalReserveTokens, criteria: [] }, baseBranch, description),
+    title: `Finalize campaign: ${plan.title}`,
+    prDraft: draft,
+    autonomous: true,
+    autonomousDelivery: "pr_only",
+    autonomousTimeoutMinutes: timeout,
+  };
+}

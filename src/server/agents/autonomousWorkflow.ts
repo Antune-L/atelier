@@ -10,6 +10,7 @@ import { getErrorMessage } from "../../shared/errors.ts";
 import { latestAcceptanceSnapshot, latestFunctionalSnapshot } from "../../shared/quality.ts";
 import type { QualityEvidence, QualityFunctionalBlockerCode, QualityRunDiagnostic, QualityValidationRun } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
+import { campaignPreviewRetainedUntil } from "../campaign/previewRetention.ts";
 import { getProject, isQualityOwner, NOT_QUALITY_OWNER_MESSAGE, SLOTS_ROOT } from "../config.ts";
 import type { Store } from "../db/store.ts";
 import { KeyedMutex } from "../mutex.ts";
@@ -263,12 +264,22 @@ export class AutonomousWorkflow {
     const ticket = this.ticket(ticketId);
     const state = this.state(ticket);
     if (state.phase !== "delivering" || !state.previewId || !state.deliveryConfirmation) throw new Error("Confirm autonomous delivery before cleaning its owned preview.");
+    const retainedUntil = campaignPreviewRetainedUntil(this.deps.store, ticketId);
+    if (retainedUntil !== null && Date.now() < retainedUntil) {
+      this.deps.store.logEvent(ticketId, "autonomous_preview_retained", { previewId: state.previewId, until: retainedUntil });
+      this.clearDeadline(ticketId);
+      return;
+    }
     await this.stopConfirmedPreview(ticketId);
     await this.waitFor(ticketId, () => {
       const preview = this.deps.preview.get(state.previewId ?? "");
       if (preview.cleanupStatus === "failed") throw new Error(preview.error ?? "Autonomous preview cleanup failed after delivery.");
       return preview.cleanupStatus === "complete" && !preview.cleanupWatch;
     }, Date.now() + DELIVERY_CLEANUP_TIMEOUT_MS);
+    this.clearDeadline(ticketId);
+  }
+
+  private clearDeadline(ticketId: string): void {
     const timer = this.deadlines.get(ticketId);
     if (timer) clearTimeout(timer);
     this.deadlines.delete(ticketId);

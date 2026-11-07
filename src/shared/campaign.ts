@@ -346,7 +346,7 @@ export type CampaignQuotaPause = z.infer<typeof campaignQuotaPauseSchema>;
 
 export const campaignFinalizationSchema = z.object({
   startedAt: timestampSchema,
-  reason: z.enum(["all_merged", "deadline", "budget"]),
+  reason: z.enum(["all_merged", "deadline", "budget", "no_progress"]),
   frozenRevision: z.string().nullable(),
   targetBranch: z.string().min(1),
   prUrl: z.string().nullable(),

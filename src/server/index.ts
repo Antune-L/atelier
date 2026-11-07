@@ -688,6 +688,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       sessionHub.disconnectAll();
       await sessionHub.drainClosingSessions();
       await delegationManager.drainClosingSessions();
+      delegationManager.stopCapacityRetry();
       db.close();
     },
   };

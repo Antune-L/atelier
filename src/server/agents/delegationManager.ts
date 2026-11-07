@@ -973,10 +973,16 @@ export class DelegationManager {
   private syncCapacityRetry(blocked: CapacityBlock | null): void {
     const waiting = this.queuedImplementations.size > 0 || this.implementationPlans.size > 0;
     if ((blocked === "memory" || blocked === "disk") && waiting) {
-      this.capacityRetryTimer ??= setInterval(() => this.queueImplementationSchedule(), this.capacityRetryMs);
-      this.capacityRetryTimer.unref();
+      if (this.capacityRetryTimer === null) {
+        this.capacityRetryTimer = setInterval(() => this.queueImplementationSchedule(), this.capacityRetryMs);
+        this.capacityRetryTimer.unref();
+      }
       return;
     }
+    this.stopCapacityRetry();
+  }
+
+  stopCapacityRetry(): void {
     if (this.capacityRetryTimer === null) return;
     clearInterval(this.capacityRetryTimer);
     this.capacityRetryTimer = null;

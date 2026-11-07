@@ -93,6 +93,7 @@ import { isLocalRequest, normalizeDevHost } from "./requestGuard.ts";
 import { createProjectPrLister, launchReview, prReservedByQualityIteration, prSummaryLines, REVIEW_COUNT_TTL_MS, reviewTicketInput } from "./reviewTickets.ts";
 import type { ProjectPrLister } from "./reviewTickets.ts";
 import { readHostMetrics } from "./system/hostMetrics.ts";
+import type { ImplementerCapacityState } from "./system/implementerCapacity.ts";
 import type { GithubAccountRegistry } from "./system/github/accounts.ts";
 import { withSiblingGroup } from "./system/repoInspection.ts";
 import type { RepoInspectionContext } from "./system/repoInspection.ts";
@@ -205,6 +206,7 @@ interface RouteDeps {
   resourcesRoot?: string;
   /** Probed once at boot: is the Cursor headless CLI (Composer driver) usable? */
   composerAvailable: boolean;
+  implementerCapacity?: () => ImplementerCapacityState;
   /** The real checkout root, for the self-update git guards + rebuild (desktop dev only). */
   repoRoot?: string;
   /** Tear down the server (not tmux) and relaunch the desktop app. Set only in dev desktop. */
@@ -1170,6 +1172,7 @@ export function createApiRoutes(deps: RouteDeps) {
       const metrics = isCloudHost() ? await readHostMetrics() : null;
       return new Response(JSON.stringify(metrics), { headers: { "content-type": "application/json" } });
     })
+    .get("/implementer-capacity", () => Response.json(deps.implementerCapacity?.() ?? null, { headers: { "cache-control": "no-store" } }))
     .get("/projects", () => ticketOperations.listProjects())
     .get("/projects/manage", () => {
       const projects: ManagedProject[] = [];

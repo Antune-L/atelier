@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
-import { DELEGATION_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS } from "../../shared/constants.ts";
+import { DELEGATION_SLOT_ID, MAX_GLOBAL_IMPLEMENTERS, MAX_PARALLEL_IMPLEMENTERS } from "../../shared/constants.ts";
 import type { VcsProvider } from "../../shared/constants.ts";
 import type { ReviewKind } from "../../shared/protocol.ts";
 import type { Ticket } from "../../shared/schemas.ts";
@@ -13,6 +13,8 @@ import { Store } from "../db/store.ts";
 import { ClientHub } from "../hub.ts";
 import type { AgentSessionHandle, AgentSessionOptions, AgentTurnUsage } from "../system/agentSession.ts";
 import { FakeSystemAdapter } from "../system/fake.ts";
+import { IMPLEMENTER_CAPACITY_ENV, ImplementerCapacity, resolveImplementerCapacityConfig } from "../system/implementerCapacity.ts";
+import type { CgroupMemory } from "../system/implementerCapacity.ts";
 import type { CodeSnapshot, DoneGateResult, PublishReviewOptions, PublishReviewResult, ReviewHeadResult } from "../system/types.ts";
 import { FIXTURE_PROJECT_KEY } from "../testing/fixtures.ts";
 import { removeDbFiles, tmpDbPath } from "../testing/tmpDb.ts";
@@ -350,6 +352,105 @@ describe("DelegationManager.start", () => {
 
     expect((await starting).ok).toBe(false);
     expect(system.sessions).toHaveLength(0);
+  });
+});
+
+const GIB = 1024 * 1024 * 1024;
+const CAPACITY_RETRY_TEST_MS = 10;
+const ROOMY_MEMORY: CgroupMemory = { limitBytes: 32 * GIB, usedBytes: 2 * GIB };
+const ROOMY_DISK = 100 * GIB;
+
+interface CapacityProbe {
+  memory: CgroupMemory | null;
+  disk: number | null;
+}
+
+function capacitySetup(env: Record<string, string>, probe: CapacityProbe): { system: RecordingSystemAdapter; sessionHub: SessionHub; delegation: DelegationManager } {
+  const system = new RecordingSystemAdapter();
+  const sessionHub = new SessionHub(system);
+  const capacity = new ImplementerCapacity(resolveImplementerCapacityConfig(env), {
+    readMemory: () => probe.memory,
+    readFreeDiskBytes: () => probe.disk,
+  });
+  const delegation = new DelegationManager(store, system, sessionHub, new ClientHub(store), undefined, undefined, { capacity, retryMs: CAPACITY_RETRY_TEST_MS });
+  sessionHub.onDisconnect((ticketId) => delegation.stop(ticketId));
+  return { system, sessionHub, delegation };
+}
+
+async function startOneLotPerTicket(delegation: DelegationManager, count: number): Promise<void> {
+  for (let index = 0; index < count; index += 1) {
+    const outcome = await delegation.start(newDelegatedTicket(), 3, `plan ${index}`, `lot-${index}`, [`src/lot-${index}.ts`]);
+    expect(outcome.ok).toBe(true);
+  }
+}
+
+describe("DelegationManager — implementer capacity", () => {
+  test("without configuration the global cap stays at MAX_GLOBAL_IMPLEMENTERS even with spare memory", async () => {
+    const { system, delegation } = capacitySetup({}, { memory: ROOMY_MEMORY, disk: ROOMY_DISK });
+    await startOneLotPerTicket(delegation, MAX_GLOBAL_IMPLEMENTERS);
+
+    const queued = await delegation.start(newDelegatedTicket(), 3, "plan en trop", "lot-extra", ["src/extra.ts"]);
+
+    expect(queued.ok).toBe(true);
+    expect(queued.result).toContain(`capacité globale de ${MAX_GLOBAL_IMPLEMENTERS} implémenteurs`);
+    expect(system.sessions).toHaveLength(MAX_GLOBAL_IMPLEMENTERS);
+    expect(delegation.implementerCapacityState()).toMatchObject({ ceiling: MAX_GLOBAL_IMPLEMENTERS, queued: 1, blockedReason: "ceiling" });
+  });
+
+  test("with a ceiling of 8 and enough memory a fifth lot of another ticket starts", async () => {
+    const { system, delegation } = capacitySetup({ [IMPLEMENTER_CAPACITY_ENV.ceiling]: "8" }, { memory: ROOMY_MEMORY, disk: ROOMY_DISK });
+    await startOneLotPerTicket(delegation, MAX_GLOBAL_IMPLEMENTERS + 1);
+
+    expect(system.sessions).toHaveLength(MAX_GLOBAL_IMPLEMENTERS + 1);
+    expect(delegation.implementerCapacityState()).toMatchObject({ source: "cgroup", active: MAX_GLOBAL_IMPLEMENTERS + 1, blockedReason: null });
+  });
+
+  test("a lot waits while the reserve is not covered, then starts on its own once memory frees", async () => {
+    const probe: CapacityProbe = { memory: { limitBytes: 8 * GIB, usedBytes: 2 * GIB }, disk: ROOMY_DISK };
+    const { system, sessionHub, delegation } = capacitySetup({ [IMPLEMENTER_CAPACITY_ENV.ceiling]: "8" }, probe);
+    await startOneLotPerTicket(delegation, MAX_GLOBAL_IMPLEMENTERS);
+    const waiting = newDelegatedTicket();
+    startParentSession(sessionHub, waiting.id);
+    const sessionsBefore = system.sessions.length;
+
+    const queued = await delegation.start(waiting, 3, "plan en attente", "lot-memoire", ["src/memoire.ts"]);
+
+    expect(queued.ok).toBe(true);
+    expect(queued.result).toContain("mémoire");
+    expect(system.sessions).toHaveLength(sessionsBefore);
+    expect(delegation.implementerCapacityState()).toMatchObject({ queued: 1, blockedReason: "memory" });
+
+    probe.memory = ROOMY_MEMORY;
+    await sleep(SETTLE_WAIT_MS);
+
+    expect(system.sessions).toHaveLength(sessionsBefore + 1);
+    expect(system.sessions.at(-1)?.sent[0]).toContain("plan en attente");
+    expect(delegation.implementerCapacityState().queued).toBe(0);
+  });
+
+  test("an unreadable cgroup applies the static ceiling and reports memory as unavailable", async () => {
+    const { system, delegation } = capacitySetup({ [IMPLEMENTER_CAPACITY_ENV.ceiling]: "8" }, { memory: null, disk: ROOMY_DISK });
+    await startOneLotPerTicket(delegation, MAX_GLOBAL_IMPLEMENTERS + 1);
+
+    expect(system.sessions).toHaveLength(MAX_GLOBAL_IMPLEMENTERS + 1);
+    expect(delegation.implementerCapacityState()).toMatchObject({ source: "static", memory: { status: "unavailable" }, ceiling: 8 });
+  });
+
+  test("an invalid configuration value applies the default and is reported", () => {
+    const { delegation } = capacitySetup({ [IMPLEMENTER_CAPACITY_ENV.ceiling]: "-3" }, { memory: ROOMY_MEMORY, disk: ROOMY_DISK });
+
+    expect(delegation.implementerCapacityState()).toMatchObject({ ceiling: MAX_GLOBAL_IMPLEMENTERS, invalidConfig: [IMPLEMENTER_CAPACITY_ENV.ceiling] });
+  });
+
+  test("free disk below its threshold stops admission and is reported", async () => {
+    const { system, delegation } = capacitySetup({ [IMPLEMENTER_CAPACITY_ENV.minFreeDisk]: "2048" }, { memory: ROOMY_MEMORY, disk: GIB });
+
+    const queued = await delegation.start(newDelegatedTicket(), 3, "plan disque", "lot-disque", ["src/disque.ts"]);
+
+    expect(queued.ok).toBe(true);
+    expect(queued.result).toContain("disque");
+    expect(system.sessions).toHaveLength(0);
+    expect(delegation.implementerCapacityState()).toMatchObject({ freeDiskBytes: GIB, blockedReason: "disk", queued: 1 });
   });
 });
 

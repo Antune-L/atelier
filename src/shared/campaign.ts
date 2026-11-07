@@ -372,6 +372,48 @@ export const campaignExtensionSchema = z.object({
   at: timestampSchema,
 });
 
+export const CAMPAIGN_READINESS_ITEMS = [
+  "repository",
+  "base_protection",
+  "mother_protection",
+  "ci",
+  "preview_recipe",
+  "preview_capacity",
+  "attachments",
+  "quota",
+  "autonomous_pilot",
+  "base_drift",
+  "skill:simplifier",
+  "skill:argus-review",
+] as const;
+export type CampaignReadinessItemId = (typeof CAMPAIGN_READINESS_ITEMS)[number];
+
+export const campaignSkillInstallSourceSchema = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("paired_machine") }),
+  z.object({ source: z.literal("skillzer"), commit: z.string(), available: z.boolean() }),
+]);
+
+export const campaignReadinessItemSchema = z.object({
+  id: z.enum(CAMPAIGN_READINESS_ITEMS),
+  status: z.enum(["ok", "warning", "blocked"]),
+  cause: z.string().nullable(),
+  detail: z.record(z.string(), z.unknown()).default({}),
+  action: z.discriminatedUnion("type", [
+    z.object({ type: z.literal("install_skill"), skill: z.string(), sources: z.array(campaignSkillInstallSourceSchema) }),
+    z.object({ type: z.literal("accept_ci_absence") }),
+  ]).nullable().default(null),
+});
+export type CampaignReadinessItem = z.infer<typeof campaignReadinessItemSchema>;
+
+export const campaignReadinessSchema = z.object({
+  checkedAt: timestampSchema,
+  host: z.enum(["vps", "mac"]),
+  version: z.number().int().positive(),
+  ready: z.boolean(),
+  items: z.array(campaignReadinessItemSchema),
+});
+export type CampaignReadiness = z.infer<typeof campaignReadinessSchema>;
+
 export const campaignRuntimeSchema = z.object({
   statusReason: z.string().nullable().default(null),
   previousStatus: z.enum(CAMPAIGN_STATUSES).nullable().default(null),
@@ -388,6 +430,8 @@ export const campaignRuntimeSchema = z.object({
   startedAt: timestampSchema.nullable().default(null),
   endedAt: timestampSchema.nullable().default(null),
   reportSentAt: timestampSchema.nullable().default(null),
+  readiness: campaignReadinessSchema.nullable().default(null),
+  approvedBaseRevision: z.string().nullable().default(null),
 });
 export type CampaignRuntime = z.infer<typeof campaignRuntimeSchema>;
 export const EMPTY_CAMPAIGN_RUNTIME: CampaignRuntime = campaignRuntimeSchema.parse({});
@@ -488,3 +532,4 @@ export const campaignReportSchema = z.object({
   }),
 });
 export type CampaignReport = z.infer<typeof campaignReportSchema>;
+

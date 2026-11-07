@@ -18,6 +18,8 @@ import {
 } from "../shared/schemas.ts";
 
 import type { AgentCoordinator } from "./agents/coordinator.ts";
+import { CAMPAIGN_TOOLS, runCampaignTool } from "./campaign/campaignMcpTools.ts";
+import type { CampaignService } from "./campaign/campaignService.ts";
 import { effectivePort, isLoopbackHost, parseHost } from "./requestGuard.ts";
 import { REVIEW_PUBLICATION_EVENTS } from "./system/types.ts";
 import { createReviewTicketInputSchema, createTodoTicketInputSchema, PullRequestListingError, TicketOperationError } from "./ticketOperations.ts";
@@ -388,8 +390,9 @@ export async function serveStatelessMcp(server: Server, request: Request, parsed
 
 type QuestionAnswerer = Pick<AgentCoordinator, "submitUserComment">;
 
-function createMcpServer(operations: TicketOperations, coordinator: QuestionAnswerer, dryRun: boolean): Server {
-  return createToolServer(PUBLIC_TOOLS, async (request): Promise<McpTextResult> => {
+function createMcpServer(operations: TicketOperations, coordinator: QuestionAnswerer, dryRun: boolean, campaigns: CampaignService | null): Server {
+  const tools = campaigns === null ? PUBLIC_TOOLS : [...PUBLIC_TOOLS, ...CAMPAIGN_TOOLS];
+  return createToolServer(tools, async (request): Promise<McpTextResult> => {
     const input = request.params.arguments ?? {};
     try {
       if (request.params.name === "list_projects") {
@@ -476,6 +479,8 @@ function createMcpServer(operations: TicketOperations, coordinator: QuestionAnsw
         const { comment, delivered } = coordinator.submitUserComment(ticketId, answer, questionId);
         return toolResult(answerQuestionOutputSchema, { commentId: comment.id, delivered, dryRun });
       }
+      const campaignOutput = campaigns === null ? null : await runCampaignTool(request.params.name, input, campaigns, dryRun);
+      if (campaignOutput !== null) return toolResult(campaignOutput.schema, campaignOutput.value);
       return toolError(new TicketOperationError("NOT_FOUND", `unknown tool: ${request.params.name}`));
     } catch (error) {
       return toolError(error);
@@ -497,6 +502,7 @@ export class PublicMcpManager {
     private readonly coordinator: QuestionAnswerer,
     token: string,
     private readonly dryRun: boolean,
+    private readonly campaigns: CampaignService | null = null,
   ) {
     this.token = token;
   }
@@ -521,6 +527,6 @@ export class PublicMcpManager {
       return jsonResponse(HTTP_BAD_REQUEST, "only MCP POST requests are accepted");
     }
 
-    return serveStatelessMcp(createMcpServer(this.operations, this.coordinator, this.dryRun), request);
+    return serveStatelessMcp(createMcpServer(this.operations, this.coordinator, this.dryRun, this.campaigns), request);
   }
 }

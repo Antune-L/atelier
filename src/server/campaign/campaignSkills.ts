@@ -86,6 +86,17 @@ export function readCampaignSkills(roots: CampaignSkillRoots): CampaignSkillFing
   });
 }
 
+/** SKILL.md content injected into campaign sessions (FR14), or null when the internal guidance applies. */
+export function readSkillInstructions(name: string, roots: CampaignSkillRoots): string | null {
+  const dir = locateSkill(name, roots);
+  if (dir === null) return null;
+  try {
+    return readFileSync(join(dir, SKILL_MANIFEST_FILE), "utf8");
+  } catch {
+    return null;
+  }
+}
+
 function safeRelativePath(path: string): string | null {
   if (isAbsolute(path)) return null;
   const normalized = normalize(path);

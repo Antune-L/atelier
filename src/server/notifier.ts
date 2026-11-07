@@ -11,12 +11,20 @@ export type NativeNotify = (title: string, body: string, soundKind?: Notificatio
  * the app itself (clicking it focuses the app window).
  */
 export class Notifier {
+  private silenced: ((ticketId: string) => boolean) | null = null;
+
   constructor(
     private readonly hub: ClientHub,
     private readonly onNative?: NativeNotify,
   ) {}
 
+  /** Tickets whose notifications are withheld, e.g. campaign cards until the single final report (FR11). */
+  silence(predicate: (ticketId: string) => boolean): void {
+    this.silenced = predicate;
+  }
+
   notify(title: string, body: string, ticketId?: string, sound?: boolean, soundKind?: NotificationSoundKind): Promise<void> {
+    if (ticketId !== undefined && this.silenced?.(ticketId)) return Promise.resolve();
     this.hub.pushNotification(title, body, ticketId, sound, soundKind ?? (sound ? "completion" : undefined));
     this.onNative?.(title, body, soundKind);
     return Promise.resolve();

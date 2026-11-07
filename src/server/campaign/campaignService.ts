@@ -207,7 +207,7 @@ export class CampaignService {
     return campaign.motherBranch ?? campaignMotherBranch(campaign.id, plan.title, plan.motherBranch);
   }
 
-  async checkReadiness(input: z.infer<typeof checkCampaignReadinessInputSchema>): Promise<CampaignReadiness> {
+  async checkReadiness(input: z.infer<typeof checkCampaignReadinessInputSchema>, approvedBaseRevision: string | null = null): Promise<CampaignReadiness> {
     const campaign = this.requireCampaign(input.campaignId);
     const version = this.store.requireVersion(campaign.id, input.version ?? campaign.currentVersion);
     const readiness = await checkCampaignReadiness({
@@ -215,12 +215,20 @@ export class CampaignService {
       version: version.version,
       plan: version.plan,
       motherBranch: this.motherBranch(campaign, version.plan),
-      approvedBaseRevision: null,
+      approvedBaseRevision,
     }, this.deps.readiness);
     const fresh = this.requireCampaign(campaign.id);
     this.store.update(campaign.id, { runtime: { ...fresh.runtime, readiness } }, this.now());
     this.store.appendEvent(campaign.id, CAMPAIGN_EVENT.readinessChecked, { version: version.version, ready: readiness.ready, blocked: readiness.items.filter((entry) => entry.status === "blocked").map((entry) => entry.id) }, this.now());
     return readiness;
+  }
+
+  /** Readiness re-run when an approved campaign starts after waiting, including drift of the base branch since approval (FR2). */
+  async readyToStart(campaign: Campaign): Promise<{ ready: boolean; reason: string | null }> {
+    if (campaign.approvedVersion === null) return { ready: false, reason: "The campaign has no approved version." };
+    const readiness = await this.checkReadiness({ campaignId: campaign.id, version: campaign.approvedVersion }, campaign.runtime.approvedBaseRevision);
+    const blocked = readiness.items.filter((entry) => entry.status === "blocked");
+    return { ready: readiness.ready, reason: blocked.length === 0 ? null : blocked.map((entry) => `${entry.id}: ${entry.cause ?? "blocked"}`).join(" | ") };
   }
 
   async installSkill(input: z.infer<typeof installCampaignSkillInputSchema>): Promise<{ outcome: SkillInstallOutcome; readiness: CampaignReadiness | null }> {

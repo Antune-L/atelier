@@ -138,6 +138,14 @@ const SETUP_PHASES = {
   waiting: "En attente de la première sortie de l'agent…",
 } as const;
 
+export interface CampaignSlotHooks {
+  /** Throws when a campaign card may not start now (prerequisites not merged, campaign paused…). */
+  assertMayStart(ticket: Ticket): void;
+  /** The campaign merges this card itself; the ordinary auto-merge path stays out of it. */
+  ownsMerge(ticketId: string): boolean;
+  onDelivered(ticketId: string, delivery: { prUrl: string; mergeEligible: boolean }): void;
+}
+
 export interface FinishTicketOptions {
   skipMerge?: boolean;
   skipPrDescription?: boolean;
@@ -199,6 +207,7 @@ export class SlotManager {
   private readonly setupPhase = new Map<string, string>();
   private readonly phaseStartedAt = new Map<string, number>();
   private delegationDrain: ((ticketId: string) => Promise<void>) | null = null;
+  private campaignHooks: CampaignSlotHooks | null = null;
   private implementationPlanResume: ((ticket: Ticket, slotId: number) => Promise<void>) | null = null;
   private implementationRecoveryGuard: ((ticketId: string, slotId: number, prUrl: string) => Promise<{ ok: boolean; result: string }>) | null = null;
   private qualityGate: ((ticketId: string, mode: "strict" | "reservations") => Promise<QualityGate>) | null = null;
@@ -249,6 +258,10 @@ export class SlotManager {
   ) {
     this.repoMutex = repoMutex;
     this.dependencyReconciliation = new DependencyReconciliation(store, system, hub, notifier, (ticket) => this.markMerged(ticket.id, ticket));
+  }
+
+  setCampaignHooks(hooks: CampaignSlotHooks): void {
+    this.campaignHooks = hooks;
   }
 
   setDelegationDrain(drain: (ticketId: string) => Promise<void>): void {
@@ -629,6 +642,7 @@ export class SlotManager {
       throw new Error(REMOTE_APPROVAL_REQUIRED_ERROR);
     }
     this.assertStartReady(ticket);
+    this.campaignHooks?.assertMayStart(ticket);
     if (ticket.autonomous) {
       const autonomousError = autonomousOptionsError(ticket, projectVcsProvider(ticket.project));
       if (autonomousError) throw new Error(autonomousError);
@@ -1880,7 +1894,7 @@ export class SlotManager {
       }
     } else if (options.skipMerge && currentTicket.resolvingConflicts) {
       this.store.logEvent(ticketId, currentTicket.reviewLevel === "high" ? MERGE_SKIPPED_REVIEW_LEVEL_HIGH_EVENT : MERGE_SKIPPED_AFTER_REVIEW_LIMIT_EVENT, { prUrl });
-    } else if (!options.skipMerge && (currentTicket.autoMerge || currentTicket.resolvingConflicts) && currentTicket.kind === "feature" && (!quality?.enabled || quality.complete)) {
+    } else if (!options.skipMerge && (currentTicket.autoMerge || currentTicket.resolvingConflicts) && currentTicket.kind === "feature" && (!quality?.enabled || quality.complete) && !this.campaignHooks?.ownsMerge(ticketId)) {
       const finalGate = await this.verifyDependencyDelivery(currentTicket, path, prUrl);
       if (!finalGate.ok) return { ok: false, reason: finalGate.reason, slotReleased: false };
       log.info("auto-merge de la PR", { ticketId, prUrl });
@@ -1949,6 +1963,7 @@ export class SlotManager {
     );
     if (column === "merged") this.dependencyReconciliation.refreshDependents(ticketId);
     if (!mergeError) this.store.logEvent(ticketId, "done", { prUrl });
+    if (column === "done") this.campaignHooks?.onDelivered(ticketId, { prUrl, mergeEligible: !options.skipMerge && (!quality?.enabled || quality.complete) });
     const cleanupError = await this.cleanupTerminalSlot(
       slotId,
       ticket,
@@ -2346,6 +2361,31 @@ export class SlotManager {
     this.pumpQueue();
   }
 
+  /** Stop a campaign card's sessions while keeping its worktree, branch and PR; `retry` resumes it. */
+  async interruptForCampaign(ticketId: string, reason: string): Promise<boolean> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || ticket.column !== "implementing") return false;
+    const queuedIndex = this.queue.indexOf(ticketId);
+    if (queuedIndex !== -1) this.queue.splice(queuedIndex, 1);
+    this.sessionHub.disconnect(ticketId, "cancelled");
+    await this.delegationDrain?.(ticketId);
+    this.clearPhase(ticketId);
+    if (ticket.slotId !== null && this.store.getSlot(ticket.slotId)?.ticketId === ticketId) this.store.updateSlot(ticket.slotId, { status: "interrupted" });
+    this.touch(this.store.updateTicket(ticketId, { stage: "interrupted", error: reason }));
+    this.store.logEvent(ticketId, "campaign_interrupted", { reason });
+    this.hub.pushSlots(this.store.listSlots());
+    return true;
+  }
+
+  /** One bounded conflict resolution on a campaign card's existing branch, sharing AUTO_MERGE_RESOLVE_MAX. */
+  async resolveCampaignConflict(ticketId: string, reason: string): Promise<"launched" | "exhausted" | "no_slot"> {
+    if (this.store.getAutoMergeResolveCount(ticketId) >= AUTO_MERGE_RESOLVE_MAX) return "exhausted";
+    const launched = await this.resolveMergeConflicts(ticketId);
+    if (!launched) return "no_slot";
+    this.store.logEvent(ticketId, AUTO_MERGE_RESOLVE_EVENT, { reason });
+    return "launched";
+  }
+
   async markMerged(ticketId: string, expected?: Ticket): Promise<Ticket> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) throw new Error(`markMerged: ticket ${ticketId} introuvable`);
@@ -2557,6 +2597,7 @@ export class SlotManager {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.column === "abandoned" || ticket.column === "merged") return;
     this.assertStartReady(ticket);
+    this.campaignHooks?.assertMayStart(ticket);
     if (this.store.getActiveQualityIteration(ticketId) || this.store.getLatestQualityIteration(ticketId)?.mode === "correction") throw new Error("Utilise Corriger et revérifier ou Reprendre la vérification pour cette carte.");
     try {
       if (await this.resumeAttachedFeatureWorktree(ticket)) return;

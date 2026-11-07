@@ -9,11 +9,14 @@ import { z } from "zod";
 import { COLUMNS, REVIEW_OUTCOMES, VCS_PROVIDERS } from "../shared/constants.ts";
 import {
   analyzeTicketsSchema,
+  commentSchema,
+  createCommentSchema,
   kindSchema,
   ticketSchema,
   updateTicketSchema,
 } from "../shared/schemas.ts";
 
+import type { AgentCoordinator } from "./agents/coordinator.ts";
 import { effectivePort, isLoopbackHost, parseHost } from "./requestGuard.ts";
 import { createTodoTicketInputSchema, TicketOperationError } from "./ticketOperations.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
@@ -24,6 +27,7 @@ const HTTP_FORBIDDEN = 403;
 const SERVER_NAME = "atelier";
 const SERVER_VERSION = "1.0.0";
 const TEXT_CONTENT_TYPE = "text";
+const RECENT_COMMENT_LIMIT = 20;
 const columnSchema = z.enum(COLUMNS);
 
 const compactTicketSchema = z.object({
@@ -148,6 +152,31 @@ const startTicketOutputSchema = z.object({
   ticket: compactTicketSchema,
   dryRun: z.boolean(),
 });
+const getTicketInputSchema = z.object({ ticketId: z.string().min(1) });
+const getTicketOutputSchema = z.object({
+  ticket: compactTicketSchema.extend({
+    prUrl: z.string().nullable().describe("URL of the pull request opened for the card, or null before publication."),
+    autonomousState: ticketSchema.shape.autonomousState.describe("Progress of the autonomous delivery, or null for a non-autonomous card."),
+  }),
+  questions: z.array(z.object({
+    questionId: z.string(),
+    text: z.string(),
+    answered: z.boolean(),
+    createdAt: z.number(),
+  })).describe("Questions asked by the agent on the card, oldest first. Answer an open one with answer_question."),
+  recentComments: z.array(commentSchema).describe(`The ${RECENT_COMMENT_LIMIT} most recent comments of the card, oldest first.`),
+  dryRun: z.boolean(),
+});
+const answerQuestionInputSchema = z.object({
+  ticketId: z.string().min(1),
+  questionId: z.string().min(1).describe("Identifier of an agent question returned by get_ticket."),
+  answer: createCommentSchema.shape.body,
+}).strict();
+const answerQuestionOutputSchema = z.object({
+  commentId: z.string().describe("Identifier of the stored answer comment."),
+  delivered: z.boolean().describe("True when the answer reached a live agent session. False when it was only stored (TODO card, or no live session)."),
+  dryRun: z.boolean(),
+});
 
 const PUBLIC_TOOLS = [
   {
@@ -166,7 +195,7 @@ const PUBLIC_TOOLS = [
   },
   {
     name: "create_todo_ticket",
-    description: "Creates a passive card in TODO without starting an agent.",
+    description: "Creates a card in TODO without starting its implementation. A new card runs its feasibility analysis in the background.",
     inputSchema: z.toJSONSchema(createTodoTicketInputSchema, { io: "input" }),
     outputSchema: z.toJSONSchema(createTodoTicketOutputSchema, { io: "output" }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
@@ -191,6 +220,20 @@ const PUBLIC_TOOLS = [
     inputSchema: z.toJSONSchema(startTicketInputSchema, { io: "input" }),
     outputSchema: z.toJSONSchema(startTicketOutputSchema, { io: "output" }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "get_ticket",
+    description: "Returns one card with what is needed to follow it: column, stage, error, pull request URL, autonomous delivery state, agent questions and recent comments.",
+    inputSchema: z.toJSONSchema(getTicketInputSchema, { io: "input" }),
+    outputSchema: z.toJSONSchema(getTicketOutputSchema, { io: "output" }),
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "answer_question",
+    description: "Answers a question asked by the agent of a card, as the board does, and reports whether a live agent session received it.",
+    inputSchema: z.toJSONSchema(answerQuestionInputSchema, { io: "input" }),
+    outputSchema: z.toJSONSchema(answerQuestionOutputSchema, { io: "output" }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   },
 ];
 
@@ -305,7 +348,9 @@ export async function serveStatelessMcp(server: Server, request: Request, parsed
   return transport.handleRequest(request, parsedBody === undefined ? undefined : { parsedBody });
 }
 
-function createMcpServer(operations: TicketOperations, dryRun: boolean): Server {
+type QuestionAnswerer = Pick<AgentCoordinator, "submitUserComment">;
+
+function createMcpServer(operations: TicketOperations, coordinator: QuestionAnswerer, dryRun: boolean): Server {
   return createToolServer(PUBLIC_TOOLS, async (request): Promise<McpTextResult> => {
     const input = request.params.arguments ?? {};
     try {
@@ -352,6 +397,31 @@ function createMcpServer(operations: TicketOperations, dryRun: boolean): Server 
           dryRun,
         });
       }
+      if (request.params.name === "get_ticket") {
+        const parsed = getTicketInputSchema.safeParse(input);
+        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
+        const { ticket, comments } = operations.getTicketDetail(parsed.data.ticketId);
+        const questions = comments
+          .filter((comment) => comment.author === "agent" && comment.questionId !== null)
+          .map((comment) => ({ questionId: comment.questionId, text: comment.body, answered: comment.answered, createdAt: comment.createdAt }));
+        return toolResult(getTicketOutputSchema, {
+          ticket,
+          questions,
+          recentComments: comments.slice(-RECENT_COMMENT_LIMIT),
+          dryRun,
+        });
+      }
+      if (request.params.name === "answer_question") {
+        const parsed = answerQuestionInputSchema.safeParse(input);
+        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
+        const { ticketId, questionId, answer } = parsed.data;
+        const { comments } = operations.getTicketDetail(ticketId);
+        if (!comments.some((comment) => comment.author === "agent" && comment.questionId === questionId)) {
+          return invalidInput("question not found on this ticket");
+        }
+        const { comment, delivered } = coordinator.submitUserComment(ticketId, answer, questionId);
+        return toolResult(answerQuestionOutputSchema, { commentId: comment.id, delivered, dryRun });
+      }
       return toolError(new TicketOperationError("NOT_FOUND", `unknown tool: ${request.params.name}`));
     } catch (error) {
       return toolError(error);
@@ -370,6 +440,7 @@ export class PublicMcpManager {
 
   constructor(
     private readonly operations: TicketOperations,
+    private readonly coordinator: QuestionAnswerer,
     token: string,
     private readonly dryRun: boolean,
   ) {
@@ -396,6 +467,6 @@ export class PublicMcpManager {
       return jsonResponse(HTTP_BAD_REQUEST, "only MCP POST requests are accepted");
     }
 
-    return serveStatelessMcp(createMcpServer(this.operations, this.dryRun), request);
+    return serveStatelessMcp(createMcpServer(this.operations, this.coordinator, this.dryRun), request);
   }
 }

@@ -59,8 +59,8 @@ function setup() {
     await sessionHub.drainClosingSessions();
     db.close();
   });
-  const forwardComment = spyOn(coordinator, "forwardComment").mockImplementation(() => undefined);
-  const answerQuestion = spyOn(coordinator, "answerQuestion").mockImplementation(() => undefined);
+  const forwardComment = spyOn(coordinator, "forwardComment").mockImplementation(() => false);
+  const answerQuestion = spyOn(coordinator, "answerQuestion").mockImplementation(() => false);
   const pushComment = spyOn(hub, "pushComment");
   const postComment = (ticketId: string, body: unknown) => app.handle(new Request(`http://localhost/api/tickets/${ticketId}/comments`, {
     method: "POST",

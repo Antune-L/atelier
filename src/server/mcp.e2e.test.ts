@@ -277,7 +277,9 @@ test("an official MCP client lists, creates idempotently, starts, and updates RE
   const tools = await client.listTools();
   expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
     "analyze_tickets",
+    "answer_question",
     "create_todo_ticket",
+    "get_ticket",
     "list_projects",
     "list_tickets",
     "start_ticket",

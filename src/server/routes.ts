@@ -1939,20 +1939,7 @@ export function createApiRoutes(deps: RouteDeps) {
       if (questionId !== null && !store.getAgentQuestion(params.id, questionId)) {
         return jsonError(set, HTTP_BAD_REQUEST, "question introuvable sur ce ticket");
       }
-      const comment = store.addComment(params.id, "user", parsed.data.body, questionId);
-      hub.pushComment(comment);
-      // A todo card has no implementation session (triage/split sessions share its id): only store
-      // the comment, which reaches feasibility analyses and the contract at start.
-      if (ticket.column === "todo") {
-        if (questionId) store.markQuestionAnswered(params.id, questionId);
-        return comment;
-      }
-      if (questionId) {
-        coordinator.answerQuestion(params.id, questionId, parsed.data.body, comment.id);
-      } else {
-        coordinator.forwardComment(params.id, parsed.data.body, comment.id);
-      }
-      return comment;
+      return coordinator.submitUserComment(params.id, parsed.data.body, questionId).comment;
     })
     .post("/tickets/:id/validate-prd", ({ params, body, set }) => {
       const ticket = store.getTicket(params.id);

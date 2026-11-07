@@ -11,7 +11,7 @@ import {
   ticketSchema,
   updateTicketSchema,
 } from "../shared/schemas.ts";
-import type { Profile, ProjectInfo, Ticket } from "../shared/schemas.ts";
+import type { Comment, Profile, ProjectInfo, Ticket } from "../shared/schemas.ts";
 import { remoteAnalysisRefusal } from "./agents/remoteAnalysis.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
 import { getProject, isProjectKey, isQualityOwner, listProjectKeys, MODELS, NOT_QUALITY_OWNER_MESSAGE } from "./config.ts";
@@ -157,6 +157,11 @@ export interface TicketPageOf<T> {
 }
 
 export type TicketPage = TicketPageOf<CompactTicket>;
+
+export interface TicketDetail {
+  ticket: CompactTicket & Pick<Ticket, "prUrl"> & { autonomousState: Ticket["autonomousState"] | null };
+  comments: Comment[];
+}
 
 export type CreateTodoTicketInput = z.input<typeof createTodoTicketInputSchema>;
 
@@ -389,6 +394,15 @@ export class TicketOperations {
     const ticket = this.deps.store.getTicket(ticketId);
     if (!ticket || ticket.project !== project) throw new TicketOperationError("NOT_FOUND", "ticket not found in this project");
     return compactTicket(ticket);
+  }
+
+  getTicketDetail(ticketId: string): TicketDetail {
+    const ticket = this.deps.store.getTicket(ticketId);
+    if (!ticket) throw new TicketOperationError("NOT_FOUND", "ticket not found");
+    return {
+      ticket: { ...listedTicket(ticket), prUrl: ticket.prUrl, autonomousState: ticket.autonomousState ?? null },
+      comments: needsRemoteApproval(ticket) ? [] : this.deps.store.listComments(ticketId),
+    };
   }
 
   createTodoTicket(input: CreateTodoTicketInput, options: CreateTodoTicketOptions = {}): CreateTodoTicketResult {

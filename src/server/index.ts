@@ -431,6 +431,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     ? null
     : new PublicMcpManager(
       ticketOperations,
+      coordinator,
       mcpToken,
       system.dryRun,
     );

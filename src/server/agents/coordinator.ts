@@ -6,7 +6,7 @@ import { ACTIVE_STAGES, ATELIER_SLOT_ID, AUTO_NUDGE_MAX, DEFAULT_PLAN_PARALLEL_I
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
 import type { ReviewFlag, ReviewLevel } from "../../shared/constants.ts";
 import { ATELIER_BOARD_TOOL_NAMES, AUTONOMOUS_UNIT_TEST_LOT, deliverAutonomousArgsSchema, qualityArgsSchema, readyForReviewArgsSchema, REVIEW_REASON_MAX_LENGTH, sendToMacArgsSchema, validateAutonomousArgsSchema } from "../../shared/protocol.ts";
-import type { Ticket, WorkerToolName } from "../../shared/schemas.ts";
+import type { Comment, Ticket, WorkerToolName } from "../../shared/schemas.ts";
 import { isRemoteTicket } from "../../shared/startBlocker.ts";
 import { OUTBOX_ITEM_ID_PREFIXES, macOutboxDraftSchema } from "../../shared/vpsBridge.ts";
 import {
@@ -1241,15 +1241,16 @@ export class AgentCoordinator {
   }
 
   /** User answered a question (comment with questionId). Forward as channel event. */
-  answerQuestion(ticketId: string, questionId: string, answer: string, messageId: string): void {
+  answerQuestion(ticketId: string, questionId: string, answer: string, messageId: string): boolean {
     this.store.markQuestionAnswered(ticketId, questionId);
-    this.sessionHub.sendEvent(ticketId, { type: "answer", questionId, answer, messageId });
+    const delivered = this.sessionHub.sendEvent(ticketId, { type: "answer", questionId, answer, messageId });
     const ticket = this.store.getTicket(ticketId);
     if (ticket && ticket.pendingQuestions === 0 && ticket.stage === "awaiting_answers") {
       this.lifecycle.resumeImplementing(ticketId);
     }
     if (ticket?.pendingQuestions === 0) this.delegation.refreshImplementationPlan(ticketId);
     this.markProgress(ticketId);
+    return delivered;
   }
 
   /**
@@ -1324,9 +1325,25 @@ export class AgentCoordinator {
   }
 
   /** Free-form user comment (no questionId) → steer the live session. Not agent progress. */
-  forwardComment(ticketId: string, body: string, messageId: string): void {
+  forwardComment(ticketId: string, body: string, messageId: string): boolean {
     const delivered = this.sessionHub.sendEvent(ticketId, { type: "user_comment", body, messageId });
     if (delivered) this.store.logEvent(ticketId, "user_comment_queued", {});
+    return delivered;
+  }
+
+  submitUserComment(ticketId: string, body: string, questionId: string | null): { comment: Comment; delivered: boolean } {
+    const comment = this.store.addComment(ticketId, "user", body, questionId);
+    this.hub.pushComment(comment);
+    // A todo card has no implementation session (triage/split sessions share its id): only store
+    // the comment, which reaches feasibility analyses and the contract at start.
+    if (this.store.getTicket(ticketId)?.column === "todo") {
+      if (questionId) this.store.markQuestionAnswered(ticketId, questionId);
+      return { comment, delivered: false };
+    }
+    const delivered = questionId
+      ? this.answerQuestion(ticketId, questionId, body, comment.id)
+      : this.forwardComment(ticketId, body, comment.id);
+    return { comment, delivered };
   }
 
   /**

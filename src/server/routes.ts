@@ -65,7 +65,7 @@ import {
   updateProjectGroupColorSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
-import type { Conversation, CreateReviewInput, CreateTicketsFromPrdInput, ManagedProject, OpenPr, PrdDocument, PrdDocumentRecord, RepoInspection, SkillStatus, SplitChildInput, Ticket, UpdateConversationInput, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
+import type { Conversation, CreateTicketsFromPrdInput, ManagedProject, OpenPr, PrdDocument, PrdDocumentRecord, RepoInspection, SkillStatus, SplitChildInput, Ticket, UpdateConversationInput, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
 import { orderSelectedPrdTasks, renderPrdAxisBrief, renderPrdMarkdown, renderPrdSingleBrief, renderPrdTaskBrief, resolveSelectedPrdTaskParents } from "../shared/prdMarkdown.ts";
 import type { ProjectConfig } from "./config.ts";
 import { MODELS, getProject, isProjectKey } from "./config.ts";
@@ -86,10 +86,12 @@ import type { SplitManager } from "./agents/splitManager.ts";
 import { slugify } from "./agents/slotManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
 import { ProjectInUseError } from "./db/store.ts";
-import type { NewReview, NewTicket, Store } from "./db/store.ts";
+import type { NewTicket, Store } from "./db/store.ts";
 import type { VpsUpdateAction, VpsUpdateStatus } from "../shared/vpsUpdate.ts";
 import { isCloudHost } from "./hostRole.ts";
 import { isLocalRequest, normalizeDevHost } from "./requestGuard.ts";
+import { createProjectPrLister, launchReview, prReservedByQualityIteration, prSummaryLines, REVIEW_COUNT_TTL_MS, reviewTicketInput } from "./reviewTickets.ts";
+import type { ProjectPrLister } from "./reviewTickets.ts";
 import { readHostMetrics } from "./system/hostMetrics.ts";
 import type { GithubAccountRegistry } from "./system/github/accounts.ts";
 import { withSiblingGroup } from "./system/repoInspection.ts";
@@ -132,7 +134,6 @@ import {
 } from "./ticketOperations.ts";
 
 const log = createLogger("triage");
-const REVIEW_COUNT_TTL_MS = 5 * 60 * 1000;
 
 /** 400 message when an orchestrator/implementer pair violates isAllowedAgentPair (see PR1 invariant). */
 const DISALLOWED_AGENT_PAIR_MSG =
@@ -210,6 +211,7 @@ interface RouteDeps {
   onRequestUpdate?: () => void;
   /** Native folder picker (desktop only); resolves to the picked path or null when cancelled. */
   pickFolder?: () => Promise<string | null>;
+  projectPrs?: ProjectPrLister;
 }
 
 /** Branch the self-update tracks; mismatch blocks the update (no auto-switch). */
@@ -253,48 +255,6 @@ const REMOTE_PROFILE_DELETE_REFUSED = "Ce profil est utilisé pour les cartes di
 const REMOTE_PROFILE_NOT_FOUND = "profil des cartes distantes introuvable";
 const REMOTE_PROJECT_UNKNOWN = "projet inconnu dans la liste du MCP distant";
 const SCHEDULED_START_CANCELLED_EVENT = "scheduled_start_cancelled";
-
-/** Shared bullet list describing the target PR of a review/clean card. */
-function prSummaryLines(pr: OpenPr): string[] {
-  const lines = [
-    `- **Titre** : ${pr.title}`,
-    `- **Branche** : \`${pr.headBranch}\``,
-    `- **Auteur** : ${pr.author}`,
-  ];
-  // Azure DevOps exposes no diff stat on a PR; omit the bullet rather than print zeros.
-  if (pr.additions !== null && pr.deletions !== null) {
-    lines.push(`- **Diff** : +${pr.additions} / -${pr.deletions}`);
-  }
-  return lines;
-}
-
-/** Markdown body shown on a review card, summarizing the target PR. */
-function reviewDescription(pr: OpenPr): string {
-  return [`Revue autonome (argus) de [PR #${pr.number}](${pr.url})`, "", ...prSummaryLines(pr)].join("\n");
-}
-
-function reviewTicketInput(input: CreateReviewInput, pr: OpenPr, language: NewReview["reviewLanguage"]): NewReview {
-  return {
-    title: `Review PR #${pr.number} — ${pr.title}`,
-    description: reviewDescription(pr),
-    project: input.project,
-    prNumber: pr.number,
-    prHeadBranch: pr.headBranch,
-    prUrl: pr.url,
-    baseBranch: input.baseBranch ?? pr.baseBranch,
-    reviewDepth: input.depth,
-    postComments: input.postComments,
-    fixComments: input.fixComments,
-    reviewLanguage: input.language ?? language,
-    humanTone: input.humanTone,
-    model: input.model,
-    effort: input.effort,
-    orchestrator: input.orchestrator,
-    codexModel: input.codexModel,
-    codexEffort: input.codexEffort,
-    codexFast: input.codexFast,
-  };
-}
 
 /** Markdown body shown on a clean card, summarizing the target PR and the user-provided context. */
 function cleanDescription(pr: OpenPr, context: string): string {
@@ -1038,35 +998,7 @@ export function createApiRoutes(deps: RouteDeps) {
     refreshResult?: Promise<{ counts: Record<string, number | null>; checkedAt: number }>;
   } | null = null;
   let reviewCountsSequence = 0;
-  const projectPrCache = new Map<string, { identity: string; prs: OpenPr[]; checkedAt: number }>();
-  const projectPrPending = new Map<string, { identity: string; result: Promise<OpenPr[]>; refreshResult?: Promise<OpenPr[]> }>();
-
-  function getProjectPrs(key: string, repoPath: string, provider: VcsProvider, refresh: boolean): Promise<OpenPr[]> {
-    const identity = JSON.stringify([repoPath, provider, store.reviewCompletionVersion()]);
-    const pending = projectPrPending.get(key);
-    if (pending?.identity === identity) {
-      if (!refresh) return pending.result;
-      if (!pending.refreshResult) {
-        const reload = () => getProjectPrs(key, repoPath, provider, true);
-        pending.refreshResult = pending.result.then(reload, reload);
-      }
-      return pending.refreshResult;
-    }
-    const cached = projectPrCache.get(key);
-    if (!refresh && cached?.identity === identity && Date.now() - cached.checkedAt < REVIEW_COUNT_TTL_MS) {
-      return Promise.resolve(cached.prs);
-    }
-    const result = deps.system.listOpenPrs(repoPath, provider).then((prs) => {
-      if (projectPrPending.get(key)?.result === result) {
-        projectPrCache.set(key, { identity, prs, checkedAt: Date.now() });
-      }
-      return prs;
-    }).finally(() => {
-      if (projectPrPending.get(key)?.result === result) projectPrPending.delete(key);
-    });
-    projectPrPending.set(key, { identity, result });
-    return result;
-  }
+  const getProjectPrs = deps.projectPrs ?? createProjectPrLister({ store, listOpenPrs: (repoPath, provider) => deps.system.listOpenPrs(repoPath, provider) });
 
   function getReviewCounts(refresh: boolean): Promise<{ counts: Record<string, number | null>; checkedAt: number }> {
     const projects = store.listProjectKeys().flatMap((key) => {
@@ -1415,9 +1347,8 @@ export function createApiRoutes(deps: RouteDeps) {
     })
     .get("/projects/:key/prs", async ({ params, query, set }) => {
       if (!isProjectKey(params.key)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
-      const project = getProject(params.key);
       try {
-        return await getProjectPrs(params.key, project.repoPath, project.vcsProvider, query.refresh === "1");
+        return await getProjectPrs(params.key, query.refresh === "1");
       } catch (error) {
         return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec du listing des PR"));
       }
@@ -1726,7 +1657,7 @@ export function createApiRoutes(deps: RouteDeps) {
       if (notification.resolvedAt !== null && (notification.ticketId === null || store.getTicket(notification.ticketId) === null)) return jsonError(set, HTTP_CONFLICT, "This review request is no longer active");
       const options = prNotificationReviewOptionsSchema.safeParse(body ?? {});
       if (!options.success) return jsonError(set, HTTP_BAD_REQUEST, options.error.message);
-      if (options.data.fixComments && store.listActiveQualityIterations().some((iteration) => iteration.project === notification.project && iteration.prUrl === notification.prUrl)) return jsonError(set, HTTP_CONFLICT, "Une PR sélectionnée est réservée par une itération qualité.");
+      if (options.data.fixComments && prReservedByQualityIteration(store, notification.project, [notification.prUrl])) return jsonError(set, HTTP_CONFLICT, "Une PR sélectionnée est réservée par une itération qualité.");
       const pr: OpenPr = {
         number: notification.prNumber, title: notification.title, url: notification.prUrl,
         headBranch: notification.headRefName, baseBranch: notification.baseRefName,
@@ -1747,29 +1678,15 @@ export function createApiRoutes(deps: RouteDeps) {
       const parsed = createReviewSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
-      if (parsed.data.fixComments && store.listActiveQualityIterations().some((iteration) => iteration.project === parsed.data.project && parsed.data.prs.some((pr) => pr.url === iteration.prUrl))) return jsonError(set, HTTP_CONFLICT, "Une PR sélectionnée est réservée par une itération qualité.");
-      const created: Ticket[] = [];
-      for (const pr of parsed.data.prs) {
-        const ticket = store.createReview(reviewTicketInput(parsed.data, pr, store.getAppSettings().commitLanguage));
-        hub.pushTicket(ticket);
-        // Slot launch does slow git worktree setup; don't block the HTTP response on it
-        // (it kept the dialog open). Kick it off in the background and let the board update live.
-        void slots.startTicket(ticket.id).catch((e) => {
-          log.error("démarrage de la review échoué", {
-            ticketId: ticket.id,
-            error: getErrorMessage(e),
-          });
-        });
-        created.push(ticket);
-      }
-      return created;
+      if (parsed.data.fixComments && prReservedByQualityIteration(store, parsed.data.project, parsed.data.prs.map((pr) => pr.url))) return jsonError(set, HTTP_CONFLICT, "Une PR sélectionnée est réservée par une itération qualité.");
+      return parsed.data.prs.map((pr) => launchReview({ store, hub, slots }, parsed.data, pr));
     })
     .post("/cleaners", ({ body, set }) => {
       if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const parsed = createCleanSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
-      if (store.listActiveQualityIterations().some((iteration) => iteration.project === parsed.data.project && parsed.data.prs.some((pr) => pr.url === iteration.prUrl))) return jsonError(set, HTTP_CONFLICT, "Une PR sélectionnée est réservée par une itération qualité.");
+      if (prReservedByQualityIteration(store, parsed.data.project, parsed.data.prs.map((pr) => pr.url))) return jsonError(set, HTTP_CONFLICT, "Une PR sélectionnée est réservée par une itération qualité.");
       const created: Ticket[] = [];
       for (const pr of parsed.data.prs) {
         const ticket = store.createClean({

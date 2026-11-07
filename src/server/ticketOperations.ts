@@ -1,17 +1,19 @@
 import { z } from "zod";
 
+import { getErrorMessage } from "../shared/errors.ts";
 import { needsRemoteApproval, startBlocker } from "../shared/startBlocker.ts";
 import { ACTIVE_STAGES, isAllowedAgentPair } from "../shared/constants.ts";
 import type { Column, ReviewOutcome, TicketOrigin } from "../shared/constants.ts";
 import {
   columnSchema,
+  createReviewSchema,
   deriveTitleFromDescription,
   externalUrlSchema,
   ticketBatchOptionsSchema,
   ticketSchema,
   updateTicketSchema,
 } from "../shared/schemas.ts";
-import type { Comment, Profile, ProjectInfo, Ticket } from "../shared/schemas.ts";
+import type { Comment, OpenPr, Profile, ProjectInfo, Ticket } from "../shared/schemas.ts";
 import { remoteAnalysisRefusal } from "./agents/remoteAnalysis.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
 import { getProject, isProjectKey, isQualityOwner, listProjectKeys, MODELS, NOT_QUALITY_OWNER_MESSAGE } from "./config.ts";
@@ -20,6 +22,8 @@ import type { NewTicket, Store, TicketPatch } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
+import { launchReview, prReservedByQualityIteration } from "./reviewTickets.ts";
+import type { ProjectPrLister } from "./reviewTickets.ts";
 
 export function autonomousPilotEnabled(vcsProvider: string): boolean {
   return (process.env.KANBAN_AUTONOMOUS_PILOT ?? "1") === "1" && vcsProvider === "github" && isQualityOwner();
@@ -38,7 +42,9 @@ export function autonomousOptionsError(input: { autoMerge?: boolean; autonomous?
 }
 
 const DEFAULT_TICKET_LIST_LIMIT = 50;
+const REVIEW_MAINTENANCE_REFUSAL = "Maintenance in progress. No review was started; retry after maintenance.";
 const MAX_TICKET_LIST_LIMIT = 100;
+const TRAILING_SLASHES = /\/+$/;
 const log = createLogger("ticket-operations");
 
 export const createTodoTicketInputSchema = ticketBatchOptionsSchema
@@ -98,6 +104,13 @@ export class TicketOperationError extends Error {
   }
 }
 
+export class PullRequestListingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PullRequestListingError";
+  }
+}
+
 export interface TicketOperationsDeps {
   isMaintenance?: () => boolean;
   store: Store;
@@ -105,6 +118,7 @@ export interface TicketOperationsDeps {
   lifecycle: TicketLifecycle;
   slots: SlotManager;
   feasibility: FeasibilityStarter;
+  listProjectPrs?: ProjectPrLister;
 }
 
 interface FeasibilityStarter {
@@ -122,6 +136,7 @@ export function startFeasibilityInBackground(feasibility: FeasibilityStarter, ti
 export interface ListTicketsInput {
   project?: string;
   column?: Column;
+  kind?: Ticket["kind"];
   limit?: number;
   offset?: number;
 }
@@ -159,7 +174,7 @@ export interface TicketPageOf<T> {
 export type TicketPage = TicketPageOf<CompactTicket>;
 
 export interface TicketDetail {
-  ticket: CompactTicket & Pick<Ticket, "prUrl"> & { autonomousState: Ticket["autonomousState"] | null };
+  ticket: CompactTicket & Pick<Ticket, "prUrl" | "prNumber"> & { autonomousState: Ticket["autonomousState"] | null; reviewedCommitSha: string | null };
   comments: Comment[];
 }
 
@@ -226,6 +241,33 @@ export function frozenAgentsOfProfile(profile: Profile): FrozenTicketAgents {
 export interface CreateTodoTicketResult {
   created: boolean;
   ticket: CompactTicket;
+}
+
+export const createReviewTicketInputSchema = createReviewSchema
+  .omit({ prs: true })
+  .extend({
+    project: z.string().min(1).describe("Key of a project returned by list_projects."),
+    pr: z.union([z.number().int().positive(), z.url()]).describe("Number or URL of an open pull request returned by list_open_prs."),
+    depth: createReviewSchema.shape.depth.describe("Argus review depth."),
+    postComments: createReviewSchema.shape.postComments.describe("Post the findings as comments on the pull request."),
+    fixComments: createReviewSchema.shape.fixComments.describe("Fix the findings and push the fixes to the pull request branch instead of only reviewing."),
+    language: createReviewSchema.shape.language.describe("Language of the review comments; null uses the app's commit language."),
+    humanTone: createReviewSchema.shape.humanTone.describe("Write the review comments in a human, conversational tone."),
+    baseBranch: createReviewSchema.shape.baseBranch.describe("Review base override; null uses the pull request's own target branch."),
+    model: createReviewSchema.shape.model.describe("Claude model of the review session; null uses the server setting."),
+    effort: createReviewSchema.shape.effort.describe("Claude effort of the review session; null uses the server setting."),
+    orchestrator: createReviewSchema.shape.orchestrator.describe("Provider that drives the review session."),
+    codexModel: createReviewSchema.shape.codexModel.describe("Codex model of the review session; null uses the server setting."),
+    codexEffort: createReviewSchema.shape.codexEffort.describe("Codex effort of the review session; null uses the server setting."),
+    codexFast: createReviewSchema.shape.codexFast.describe("Enable fast mode for the Codex review session."),
+  })
+  .strict();
+
+export type CreateReviewTicketInput = z.output<typeof createReviewTicketInputSchema>;
+
+function matchesPr(pr: OpenPr, target: number | string): boolean {
+  if (typeof target === "number") return pr.number === target;
+  return pr.url.replace(TRAILING_SLASHES, "") === target.replace(TRAILING_SLASHES, "");
 }
 
 export interface StartTicketResult {
@@ -384,7 +426,8 @@ export class TicketOperations {
     const filtered = this.deps.store
       .listTickets(false)
       .filter(include)
-      .filter((ticket) => input.column === undefined || ticket.column === input.column);
+      .filter((ticket) => input.column === undefined || ticket.column === input.column)
+      .filter((ticket) => input.kind === undefined || ticket.kind === input.kind);
     const tickets = filtered.slice(offset, offset + limit);
     const nextOffset = offset + tickets.length < filtered.length ? offset + tickets.length : null;
     return { tickets, total: filtered.length, nextOffset };
@@ -400,9 +443,39 @@ export class TicketOperations {
     const ticket = this.deps.store.getTicket(ticketId);
     if (!ticket) throw new TicketOperationError("NOT_FOUND", "ticket not found");
     return {
-      ticket: { ...listedTicket(ticket), prUrl: ticket.prUrl, autonomousState: ticket.autonomousState ?? null },
+      ticket: {
+        ...listedTicket(ticket),
+        prUrl: ticket.prUrl,
+        prNumber: ticket.prNumber,
+        autonomousState: ticket.autonomousState ?? null,
+        reviewedCommitSha: ticket.kind === "review" ? this.deps.store.getReviewPass(ticketId)?.reviewedCommitSha ?? null : null,
+      },
       comments: needsRemoteApproval(ticket) ? [] : this.deps.store.listComments(ticketId),
     };
+  }
+
+  async listOpenPrs(project: string, refresh: boolean): Promise<OpenPr[]> {
+    if (!isProjectKey(project)) throw new TicketOperationError("INVALID_INPUT", "unknown project");
+    if (this.deps.listProjectPrs === undefined) throw new PullRequestListingError("pull request listing is not available on this server");
+    try {
+      return await this.deps.listProjectPrs(project, refresh);
+    } catch (error) {
+      throw new PullRequestListingError(`failed to list pull requests: ${getErrorMessage(error)}`);
+    }
+  }
+
+  async createReviewTicket(input: CreateReviewTicketInput): Promise<CreateTodoTicketResult> {
+    if (this.deps.isMaintenance?.()) throw new TicketOperationError("CONFLICT", REVIEW_MAINTENANCE_REFUSAL);
+    const { pr: target, ...options } = input;
+    const cached = await this.listOpenPrs(input.project, false);
+    const pr = cached.find((candidate) => matchesPr(candidate, target))
+      ?? (await this.listOpenPrs(input.project, true)).find((candidate) => matchesPr(candidate, target));
+    if (pr === undefined) throw new TicketOperationError("NOT_FOUND", `pull request ${String(target)} is not among the open pull requests of project ${input.project}`);
+    if (options.fixComments && prReservedByQualityIteration(this.deps.store, input.project, [pr.url])) {
+      throw new TicketOperationError("CONFLICT", "This pull request is reserved by an active quality iteration.");
+    }
+    if (this.deps.isMaintenance?.()) throw new TicketOperationError("CONFLICT", REVIEW_MAINTENANCE_REFUSAL);
+    return { created: true, ticket: compactTicket(launchReview(this.deps, options, pr)) };
   }
 
   createTodoTicket(input: CreateTodoTicketInput, options: CreateTodoTicketOptions = {}): CreateTodoTicketResult {

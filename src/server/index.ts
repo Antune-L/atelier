@@ -66,6 +66,7 @@ import { configureClaudeProvisionDir, ensureClaudeBinary } from "./system/claude
 import { createSystemAdapter } from "./system/index.ts";
 import { configureGithubAccountsRoot, setGithubProjectSource } from "./system/github/accountEnv.ts";
 import { redactSecrets } from "./system/secretRedaction.ts";
+import { createProjectPrLister } from "./reviewTickets.ts";
 import { createTicketOperations } from "./ticketOperations.ts";
 import type { TerminalSocket } from "./terminalManager.ts";
 import { TerminalSessionManager } from "./terminalManager.ts";
@@ -327,8 +328,10 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   }, repoMutex);
   triageManager.setAnalysisSettledHandler((ticketId) => slotManager.resumeDeferredDependent(ticketId));
   feasibilityManager.setAnalysisSettledHandler((ticketId) => slotManager.resumeDeferredDependent(ticketId));
+  const projectPrs = createProjectPrLister({ store, listOpenPrs: (repoPath, provider) => system.listOpenPrs(repoPath, provider) });
   const ticketOperations = createTicketOperations({
     isMaintenance: () => system.sourceUpdateAdmission.isUpdating,
+    listProjectPrs: projectPrs,
     store,
     hub: clientHub,
     lifecycle,
@@ -469,6 +472,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   });
 
   const api = createApiRoutes({
+    projectPrs,
     quota: quotaService,
     previews: previewManager,
     quality: qualityManager,

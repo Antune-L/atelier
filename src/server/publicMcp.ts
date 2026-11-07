@@ -12,13 +12,14 @@ import {
   commentSchema,
   createCommentSchema,
   kindSchema,
+  openPrSchema,
   ticketSchema,
   updateTicketSchema,
 } from "../shared/schemas.ts";
 
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import { effectivePort, isLoopbackHost, parseHost } from "./requestGuard.ts";
-import { createTodoTicketInputSchema, TicketOperationError } from "./ticketOperations.ts";
+import { createReviewTicketInputSchema, createTodoTicketInputSchema, PullRequestListingError, TicketOperationError } from "./ticketOperations.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
 
 const HTTP_BAD_REQUEST = 400;
@@ -71,6 +72,7 @@ const listProjectsOutputSchema = z.object({ projects: z.array(projectSchema), dr
 const listTicketsInputSchema = z.object({
   project: z.string().optional(),
   column: columnSchema.optional(),
+  kind: kindSchema.optional().describe("Only cards of this kind, for example review."),
   limit: z.number().int().min(1).max(100).optional(),
   offset: z.number().int().min(0).optional(),
 });
@@ -155,7 +157,9 @@ const startTicketOutputSchema = z.object({
 const getTicketInputSchema = z.object({ ticketId: z.string().min(1) });
 const getTicketOutputSchema = z.object({
   ticket: compactTicketSchema.extend({
-    prUrl: z.string().nullable().describe("URL of the pull request opened for the card, or null before publication."),
+    prUrl: z.string().nullable().describe("URL of the pull request opened for the card, or of the reviewed pull request for a review card; null before publication."),
+    prNumber: ticketSchema.shape.prNumber.describe("Number of the reviewed pull request for a review card, null otherwise."),
+    reviewedCommitSha: z.string().nullable().describe("Review cards only: pull request head commit read by the latest review pass, or null before that pass prepared its worktree. Compare it with the current head to skip a pull request already reviewed at the same commit."),
     autonomousState: ticketSchema.shape.autonomousState.describe("Progress of the autonomous delivery, or null for a non-autonomous card."),
   }),
   questions: z.array(z.object({
@@ -178,6 +182,12 @@ const answerQuestionOutputSchema = z.object({
   dryRun: z.boolean(),
 });
 
+const listOpenPrsInputSchema = z.object({
+  project: z.string().min(1).describe("Key of a project returned by list_projects."),
+  refresh: z.boolean().optional().describe("Bypass the five-minute cache and query the VCS provider again."),
+}).strict();
+const listOpenPrsOutputSchema = z.object({ prs: z.array(openPrSchema), dryRun: z.boolean() });
+
 const PUBLIC_TOOLS = [
   {
     name: "list_projects",
@@ -199,6 +209,20 @@ const PUBLIC_TOOLS = [
     inputSchema: z.toJSONSchema(createTodoTicketInputSchema, { io: "input" }),
     outputSchema: z.toJSONSchema(createTodoTicketOutputSchema, { io: "output" }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "list_open_prs",
+    description: "Lists the open pull requests of a project, as shown in the board's review dialog.",
+    inputSchema: z.toJSONSchema(listOpenPrsInputSchema, { io: "input" }),
+    outputSchema: z.toJSONSchema(listOpenPrsOutputSchema, { io: "output" }),
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "create_review_ticket",
+    description: "Creates one review card for one open pull request and starts it immediately. Follow it with get_ticket until the reviewed column. Not idempotent: each call creates a new card.",
+    inputSchema: z.toJSONSchema(createReviewTicketInputSchema, { io: "input" }),
+    outputSchema: z.toJSONSchema(createTodoTicketOutputSchema, { io: "output" }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   },
   {
     name: "analyze_tickets",
@@ -307,6 +331,7 @@ export function errorResult(code: string, message: string): McpTextResult {
 
 function toolError(error: unknown): McpTextResult {
   if (error instanceof TicketOperationError) return errorResult(error.code, error.message);
+  if (error instanceof PullRequestListingError) return errorResult("UPSTREAM_ERROR", error.message);
   return errorResult("INTERNAL_ERROR", "internal server error");
 }
 
@@ -369,6 +394,22 @@ function createMcpServer(operations: TicketOperations, coordinator: QuestionAnsw
         if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
         return toolResult(createTodoTicketOutputSchema, {
           ...operations.createTodoTicket(parsed.data),
+          dryRun,
+        });
+      }
+      if (request.params.name === "list_open_prs") {
+        const parsed = listOpenPrsInputSchema.safeParse(input);
+        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
+        return toolResult(listOpenPrsOutputSchema, {
+          prs: await operations.listOpenPrs(parsed.data.project, parsed.data.refresh ?? false),
+          dryRun,
+        });
+      }
+      if (request.params.name === "create_review_ticket") {
+        const parsed = createReviewTicketInputSchema.safeParse(input);
+        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
+        return toolResult(createTodoTicketOutputSchema, {
+          ...await operations.createReviewTicket(parsed.data),
           dryRun,
         });
       }

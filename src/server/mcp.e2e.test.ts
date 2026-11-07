@@ -9,7 +9,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { z } from "zod";
 
 import { createMcpSettingsController } from "../../desktop/mcpSettings.ts";
-import { ticketSchema, wsClientEventSchema } from "../shared/schemas.ts";
+import { openPrSchema, ticketSchema, wsClientEventSchema } from "../shared/schemas.ts";
 
 import { startServer } from "./index.ts";
 import type { RunningServer } from "./index.ts";
@@ -278,8 +278,10 @@ test("an official MCP client lists, creates idempotently, starts, and updates RE
   expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
     "analyze_tickets",
     "answer_question",
+    "create_review_ticket",
     "create_todo_ticket",
     "get_ticket",
+    "list_open_prs",
     "list_projects",
     "list_tickets",
     "start_ticket",
@@ -1006,6 +1008,47 @@ test("list_tickets includes ask and clean cards created by the existing REST wor
   })));
   expect(listed.tickets.map((ticket) => ticket.kind)).toContain("ask");
   expect(listed.tickets.map((ticket) => ticket.kind)).toContain("clean");
+});
+
+test("list_open_prs and create_review_ticket start one review card that list_tickets and get_ticket follow", async () => {
+  if (client === null) throw new Error("client MCP non initialisé");
+
+  const listedPrs = z.object({ prs: z.array(openPrSchema), dryRun: z.boolean() }).parse(structuredContent(await client.callTool({
+    name: "list_open_prs",
+    arguments: { project: PROJECT_KEY, refresh: true },
+  })));
+  expect(listedPrs.dryRun).toBe(true);
+  const target = listedPrs.prs[0];
+  if (target === undefined) throw new Error("aucune PR factice");
+
+  const created = createResultSchema.parse(structuredContent(await client.callTool({
+    name: "create_review_ticket",
+    arguments: { project: PROJECT_KEY, pr: target.url, postComments: false },
+  })));
+  expect(created).toMatchObject({ created: true, dryRun: true, ticket: { kind: "review", project: PROJECT_KEY } });
+
+  const persisted = z.array(ticketSchema).parse(await (await fetch(`${baseUrl}/api/tickets`)).json())
+    .find((ticket) => ticket.id === created.ticket.id);
+  expect(persisted).toMatchObject({ prNumber: target.number, prUrl: target.url, postComments: false, reviewDepth: "full", fixComments: false });
+
+  const reviews = ticketPageSchema.parse(structuredContent(await client.callTool({
+    name: "list_tickets",
+    arguments: { project: PROJECT_KEY, kind: "review", limit: 100 },
+  })));
+  expect(reviews.tickets.map((ticket) => ticket.id)).toEqual([created.ticket.id]);
+
+  const detail = z.object({
+    ticket: z.object({ prNumber: z.number().nullable(), prUrl: z.string().nullable(), reviewedCommitSha: z.string().nullable() }),
+  }).parse(structuredContent(await client.callTool({ name: "get_ticket", arguments: { ticketId: created.ticket.id } })));
+  expect(detail.ticket).toMatchObject({ prNumber: target.number, prUrl: target.url });
+
+  const missingPr = await client.callTool({ name: "create_review_ticket", arguments: { project: PROJECT_KEY, pr: 987_654 } });
+  expect(missingPr.isError).toBe(true);
+  expect(errorResultSchema.parse(textContent(missingPr)).error.code).toBe("NOT_FOUND");
+
+  const unknownProject = await client.callTool({ name: "list_open_prs", arguments: { project: "unknown-project" } });
+  expect(unknownProject.isError).toBe(true);
+  expect(errorResultSchema.parse(textContent(unknownProject)).error.code).toBe("INVALID_INPUT");
 });
 
 test("the public MCP endpoint rejects invalid access and stays absent when disabled", async () => {

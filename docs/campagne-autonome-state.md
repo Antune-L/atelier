@@ -15,11 +15,11 @@
 | T5 quota pause | `feat/campagne-t5-quota` | #275 | T3 |
 | T6 finalization | `feat/campagne-t6-finalization` | #276 | T5 |
 | T7 report, commands, FR10 | `feat/campagne-t7-report` | #277 | T6 |
-| T10 VPS config and docs | `feat/campagne-t10-ops` | not opened yet | T7 |
+| T10 VPS config and docs | `feat/campagne-t10-ops` | #278 | T7 |
 | T4 memory admission | `feat/campagne-t4-memory-admission` | #272 | `main` |
 
 - Every PR had a simplifier pass and a regression-check before opening; each review found and fixed real defects (listed in the PR bodies).
-- Next action: finish the T10 review, open the T10 PR, then wait for the user's go for T10's VPS steps and T8.
+- Next action: wait for the user's decisions (merge order, VPS steps of T10, T8 real run); nothing on the VPS was touched.
 
 ## Design decisions (verified against the code)
 

@@ -14,6 +14,8 @@ import {
   updateTicketSchema,
 } from "../shared/schemas.ts";
 import type { Comment, OpenPr, Profile, ProjectInfo, Ticket } from "../shared/schemas.ts";
+import { reviewVerdictSummary } from "./agents/reviewPass.ts";
+import type { ReviewVerdictSummary } from "./agents/reviewPass.ts";
 import { remoteAnalysisRefusal } from "./agents/remoteAnalysis.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
 import { getProject, isProjectKey, isQualityOwner, listProjectKeys, MODELS, NOT_QUALITY_OWNER_MESSAGE } from "./config.ts";
@@ -174,7 +176,11 @@ export interface TicketPageOf<T> {
 export type TicketPage = TicketPageOf<CompactTicket>;
 
 export interface TicketDetail {
-  ticket: CompactTicket & Pick<Ticket, "prUrl" | "prNumber"> & { autonomousState: Ticket["autonomousState"] | null; reviewedCommitSha: string | null };
+  ticket: CompactTicket & Pick<Ticket, "prUrl" | "prNumber"> & {
+    autonomousState: Ticket["autonomousState"] | null;
+    reviewedCommitSha: string | null;
+    reviewVerdict: ReviewVerdictSummary | null;
+  };
   comments: Comment[];
 }
 
@@ -442,13 +448,15 @@ export class TicketOperations {
   getTicketDetail(ticketId: string): TicketDetail {
     const ticket = this.deps.store.getTicket(ticketId);
     if (!ticket) throw new TicketOperationError("NOT_FOUND", "ticket not found");
+    const reviewPass = ticket.kind === "review" ? this.deps.store.getReviewPass(ticketId) : null;
     return {
       ticket: {
         ...listedTicket(ticket),
         prUrl: ticket.prUrl,
         prNumber: ticket.prNumber,
         autonomousState: ticket.autonomousState ?? null,
-        reviewedCommitSha: ticket.kind === "review" ? this.deps.store.getReviewPass(ticketId)?.reviewedCommitSha ?? null : null,
+        reviewedCommitSha: reviewPass?.reviewedCommitSha ?? null,
+        reviewVerdict: reviewVerdictSummary(reviewPass),
       },
       comments: needsRemoteApproval(ticket) ? [] : this.deps.store.listComments(ticketId),
     };

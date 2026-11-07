@@ -19,6 +19,7 @@ import {
 
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import { effectivePort, isLoopbackHost, parseHost } from "./requestGuard.ts";
+import { REVIEW_PUBLICATION_EVENTS } from "./system/types.ts";
 import { createReviewTicketInputSchema, createTodoTicketInputSchema, PullRequestListingError, TicketOperationError } from "./ticketOperations.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
 
@@ -155,12 +156,24 @@ const startTicketOutputSchema = z.object({
   dryRun: z.boolean(),
 });
 const getTicketInputSchema = z.object({ ticketId: z.string().min(1) });
+const reviewVerdictOutputSchema = z.object({
+  passId: z.string().describe("Identifier of the review pass this verdict comes from."),
+  verdict: z.enum(REVIEW_PUBLICATION_EVENTS).describe("Review event of the pass: APPROVE when no finding is retained, REQUEST_CHANGES when at least one critical or major finding is retained, COMMENT when only minor findings are retained or the user forced a comment."),
+  findings: z.object({
+    critical: z.number().int().nonnegative().describe("Retained critical findings."),
+    major: z.number().int().nonnegative().describe("Retained major findings."),
+    minor: z.number().int().nonnegative().describe("Retained minor findings."),
+    blocking: z.number().int().nonnegative().describe("Retained blocking findings: critical plus major."),
+  }).describe("Findings retained after verification, deduplication across reviewers and user dismissals, counted by severity."),
+  dismissed: z.number().int().nonnegative().describe("Findings dismissed by the user (false positive or accepted risk), excluded from the counts above."),
+});
 const getTicketOutputSchema = z.object({
   ticket: compactTicketSchema.extend({
     prUrl: z.string().nullable().describe("URL of the pull request opened for the card, or of the reviewed pull request for a review card; null before publication."),
     prNumber: ticketSchema.shape.prNumber.describe("Number of the reviewed pull request for a review card, null otherwise."),
     reviewedCommitSha: z.string().nullable().describe("Review cards only: pull request head commit read by the latest review pass, or null before that pass prepared its worktree. Compare it with the current head to skip a pull request already reviewed at the same commit."),
     autonomousState: ticketSchema.shape.autonomousState.describe("Progress of the autonomous delivery, or null for a non-autonomous card."),
+    reviewVerdict: reviewVerdictOutputSchema.nullable().describe("Review cards only: outcome of the latest review pass once every reviewer of that pass completed; null for other cards, before the first pass finishes, and while a newer pass is still running."),
   }),
   questions: z.array(z.object({
     questionId: z.string(),

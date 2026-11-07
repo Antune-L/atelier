@@ -910,6 +910,7 @@ export const openPrSchema = z.object({
   title: z.string(),
   url: z.url(),
   headBranch: z.string(),
+  headSha: z.string().min(1).nullable().default(null).describe("Head commit of the pull request as reported by the provider listing, or null when the provider did not return it. Compare it with get_ticket reviewedCommitSha to skip a pull request already reviewed at this commit."),
   /** The PR's real target branch, as detected by the provider — argus reviews against it.
    * Validated like any base branch since it ends up interpolated into the argus `--base` command. */
   baseBranch: baseBranchSchema,

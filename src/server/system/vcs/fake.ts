@@ -31,6 +31,7 @@ const FAKE_OPEN_PRS: OpenPr[] = [
     title: "feat: panier multi-devises",
     url: "https://github.com/acme/repo/pull/142",
     headBranch: "feat/panier-devises",
+    headSha: FAKE_REVIEW_HEAD,
     baseBranch: "main",
     isDraft: false,
     reviewStatus: "needs_review",
@@ -44,6 +45,7 @@ const FAKE_OPEN_PRS: OpenPr[] = [
     title: "fix: race condition au checkout",
     url: "https://github.com/acme/repo/pull/137",
     headBranch: "fix/checkout-race",
+    headSha: FAKE_REVIEW_HEAD,
     baseBranch: "develop",
     isDraft: false,
     reviewStatus: "none",
@@ -57,6 +59,7 @@ const FAKE_OPEN_PRS: OpenPr[] = [
     title: "chore: bump des dépendances",
     url: "https://github.com/acme/repo/pull/130",
     headBranch: "chore/bump-deps",
+    headSha: FAKE_REVIEW_HEAD,
     baseBranch: "main",
     isDraft: true,
     reviewStatus: "approved",
@@ -116,7 +119,7 @@ export class FakeVcsClient implements VcsClient {
     const prNumber = FAKE_STEALTH_PR_BASE + baseBranch.length;
     const url = `https://github.com/fake/repo/pull/${prNumber}`;
     this.bodies.set(url, opts.body ?? FAKE_PR_BODY);
-    this.createdPrs.set(url, { number: prNumber, title: opts.title ?? baseBranch, url, headBranch: opts.headBranch ?? baseBranch, baseBranch, isDraft: opts.draft, reviewStatus: "none", updatedAt: new Date().toISOString(), author: "simulation", additions: 0, deletions: 0 });
+    this.createdPrs.set(url, { number: prNumber, title: opts.title ?? baseBranch, url, headBranch: opts.headBranch ?? baseBranch, headSha: FAKE_REVIEW_HEAD, baseBranch, isDraft: opts.draft, reviewStatus: "none", updatedAt: new Date().toISOString(), author: "simulation", additions: 0, deletions: 0 });
     return { ok: true, url, reason: "" };
   }
 

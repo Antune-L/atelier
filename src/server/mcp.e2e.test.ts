@@ -20,6 +20,8 @@ const OTHER_PROJECT_KEY = "mcp-e2e-other";
 const REQUEST_ID = "create-e2e-ticket";
 const EVENT_TIMEOUT_MS = 5_000;
 const BACKGROUND_TASK_SETTLE_MS = 3_000;
+const FAKE_REVIEW_HEAD_SHA = "dry-run-review-head";
+const REVIEW_FIXTURE_PASS_ID = "mcp-e2e-review-pass";
 
 const compactTicketSchema = z.object({
   id: z.string(),
@@ -1037,10 +1039,50 @@ test("list_open_prs and create_review_ticket start one review card that list_tic
   })));
   expect(reviews.tickets.map((ticket) => ticket.id)).toEqual([created.ticket.id]);
 
-  const detail = z.object({
-    ticket: z.object({ prNumber: z.number().nullable(), prUrl: z.string().nullable(), reviewedCommitSha: z.string().nullable() }),
-  }).parse(structuredContent(await client.callTool({ name: "get_ticket", arguments: { ticketId: created.ticket.id } })));
-  expect(detail.ticket).toMatchObject({ prNumber: target.number, prUrl: target.url });
+  expect(target.headSha).toBe(FAKE_REVIEW_HEAD_SHA);
+  const reviewDetailSchema = z.object({
+    ticket: z.object({
+      prNumber: z.number().nullable(),
+      prUrl: z.string().nullable(),
+      reviewedCommitSha: z.string().nullable(),
+      reviewVerdict: z.object({
+        passId: z.string(),
+        verdict: z.enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"]),
+        findings: z.object({ critical: z.number(), major: z.number(), minor: z.number(), blocking: z.number() }),
+        dismissed: z.number(),
+      }).nullable(),
+    }),
+  });
+  const mcp = client;
+  const readReviewDetail = async () => reviewDetailSchema.parse(structuredContent(await mcp.callTool({ name: "get_ticket", arguments: { ticketId: created.ticket.id } })));
+  expect((await readReviewDetail()).ticket).toMatchObject({ prNumber: target.number, prUrl: target.url, reviewVerdict: null });
+
+  const fixtureDatabase = new Database(join(dataRoot, "kanban.db"));
+  fixtureDatabase.run(
+    "INSERT OR REPLACE INTO review_passes (ticket_id, pass_id, code_fingerprint, review_depth, created_at, reviewed_commit_sha) VALUES (?, ?, 'fixture', 'light', ?, ?)",
+    [created.ticket.id, REVIEW_FIXTURE_PASS_ID, Date.now(), target.headSha],
+  );
+  const insertResult = (kind: string, status: string, findings: unknown[]) => fixtureDatabase.run(
+    "INSERT OR REPLACE INTO review_approvals (ticket_id, pass_id, kind, approved, verdict, summary, findings_json, status, verification_status, revision, created_at) VALUES (?, ?, ?, 0, 'revise', 'fixture', ?, ?, 'not_needed', ?, ?)",
+    [created.ticket.id, REVIEW_FIXTURE_PASS_ID, kind, JSON.stringify(findings), status, `${kind}-fixture`, Date.now()],
+  );
+  const finding = (id: string, severity: string, path: string) => ({ id, severity, summary: `Fixture ${id}`, evidence: `Evidence ${id}`, path, line: 1 });
+  insertResult("quality", "completed", [finding("q1", "critical", "a.ts"), finding("q2", "minor", "b.ts")]);
+  insertResult("conventions", "completed", [finding("c1", "major", "c.ts")]);
+  insertResult("regression", "completed", []);
+  insertResult("logic", "pending", []);
+  const pending = await readReviewDetail();
+  expect(pending.ticket).toMatchObject({ reviewedCommitSha: target.headSha, reviewVerdict: null });
+
+  insertResult("logic", "completed", [finding("l1", "minor", "d.ts")]);
+  fixtureDatabase.close();
+  const finished = await readReviewDetail();
+  expect(finished.ticket.reviewVerdict).toEqual({
+    passId: REVIEW_FIXTURE_PASS_ID,
+    verdict: "REQUEST_CHANGES",
+    findings: { critical: 1, major: 1, minor: 2, blocking: 2 },
+    dismissed: 0,
+  });
 
   const missingPr = await client.callTool({ name: "create_review_ticket", arguments: { project: PROJECT_KEY, pr: 987_654 } });
   expect(missingPr.isError).toBe(true);

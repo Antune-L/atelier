@@ -43,7 +43,7 @@ import type { CreatePrResult, PrSnapshot, ReviewPublicationCheck, ReviewRequestS
 
 const GH_BINARY = "gh";
 const OPEN_PR_FIELDS = `
-  number title url headRefName baseRefName isDraft reviewDecision updatedAt
+  number title url headRefName headRefOid baseRefName isDraft reviewDecision updatedAt
   author { login } additions deletions
   commentedReviews: reviews(first:1,states:[COMMENTED]) { totalCount }
 `;
@@ -68,7 +68,7 @@ const ghAuthenticatedUserSchema = z.object({ id: z.number().int(), login: z.stri
 const ghRequestedPullSchema = z.object({
   number: z.number().int(), title: z.string(), html_url: z.string(), draft: z.boolean(),
   updated_at: z.string(), user: z.object({ login: z.string() }).nullable(),
-  head: z.object({ ref: z.string() }), base: z.object({ ref: z.string() }),
+  head: z.object({ ref: z.string(), sha: z.string().min(1).nullable().catch(null) }), base: z.object({ ref: z.string() }),
   requested_reviewers: z.array(z.object({ id: z.number().int() })),
 });
 const ghRequestedPullPagesSchema = z.array(z.array(ghRequestedPullSchema));
@@ -134,6 +134,7 @@ const ghPrSchema = z.object({
   title: z.string(),
   url: z.string(),
   headRefName: z.string(),
+  headRefOid: z.string().min(1).nullable().catch(null),
   baseRefName: z.string(),
   isDraft: z.boolean(),
   reviewDecision: z.string().nullable(),
@@ -214,6 +215,7 @@ function mapGithubPr(pr: z.infer<typeof ghPrSchema>): OpenPr {
     title: pr.title,
     url: pr.url,
     headBranch: pr.headRefName,
+    headSha: pr.headRefOid,
     baseBranch: pr.baseRefName,
     isDraft: pr.isDraft,
     reviewStatus,
@@ -437,7 +439,7 @@ export class GithubVcsClient implements VcsClient {
     return {
       identityKey,
       prs: prs.map((pr, index) => ({
-        number: pr.number, title: pr.title, url: pr.html_url, headBranch: pr.head.ref, baseBranch: pr.base.ref,
+        number: pr.number, title: pr.title, url: pr.html_url, headBranch: pr.head.ref, headSha: pr.head.sha, baseBranch: pr.base.ref,
         isDraft: pr.draft, reviewStatus: "needs_review", updatedAt: pr.updated_at, author: pr.user?.login ?? "?",
         additions: null, deletions: null, requestedAt: requestedAts[index] ?? pr.updated_at,
       })),

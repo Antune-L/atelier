@@ -115,6 +115,40 @@ export function effectiveReviewResult(
   };
 }
 
+export interface ReviewFindingCounts {
+  critical: number;
+  major: number;
+  minor: number;
+  blocking: number;
+}
+
+export interface ReviewVerdictSummary {
+  passId: string;
+  verdict: ReviewPublicationEvent;
+  findings: ReviewFindingCounts;
+  dismissed: number;
+}
+
+function countFindingsBySeverity(findings: readonly ReviewFinding[]): ReviewFindingCounts {
+  const counts: ReviewFindingCounts = { critical: 0, major: 0, minor: 0, blocking: 0 };
+  for (const finding of findings) {
+    counts[finding.severity] += 1;
+    if (finding.severity !== "minor") counts.blocking += 1;
+  }
+  return counts;
+}
+
+export function reviewVerdictSummary(reviewPass: ReviewPass | null): ReviewVerdictSummary | null {
+  const effective = effectiveReviewResult(reviewPass);
+  if (reviewPass === null || effective === null) return null;
+  return {
+    passId: reviewPass.passId,
+    verdict: effective.event,
+    findings: countFindingsBySeverity(effective.findings),
+    dismissed: effective.dismissed.length,
+  };
+}
+
 /**
  * How many review passes a ticket may consume before the done gate accepts open `revise` findings.
  * `argusMultiLoop` buys exactly one extra pass on top of the default budget.

@@ -1660,7 +1660,7 @@ export function createApiRoutes(deps: RouteDeps) {
       if (options.data.fixComments && prReservedByQualityIteration(store, notification.project, [notification.prUrl])) return jsonError(set, HTTP_CONFLICT, "Une PR sélectionnée est réservée par une itération qualité.");
       const pr: OpenPr = {
         number: notification.prNumber, title: notification.title, url: notification.prUrl,
-        headBranch: notification.headRefName, baseBranch: notification.baseRefName,
+        headBranch: notification.headRefName, headSha: null, baseBranch: notification.baseRefName,
         isDraft: false, reviewStatus: "needs_review", updatedAt: new Date(notification.requestedAt ?? notification.detectedAt).toISOString(),
         author: notification.author, additions: null, deletions: null,
       };

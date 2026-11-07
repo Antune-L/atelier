@@ -99,6 +99,8 @@ async function setup(overrides: Parameters<typeof makeCampaignPlan>[0] = {}) {
     preview: { get: (id) => previews.get(id) ?? null, stop: (id) => { stopped.push(id); return Promise.resolve(); } },
   });
   const engine = makeEngine();
+  engine.start(3_600_000);
+  await engine.tick();
   const ticketOf = (cardId: string): Ticket => {
     const ticketId = harness.store.campaigns.requireCard(campaignId, cardId).ticketId;
     const ticket = ticketId === null ? null : harness.store.getTicket(ticketId);
@@ -498,5 +500,29 @@ describe("CampaignEngine report and user commands", () => {
     const replay = await ctx.service.pause({ requestId: "p1", campaignId: ctx.campaignId });
     expect(replay).toEqual(first);
     await expect(ctx.service.resume({ requestId: "r9", campaignId: ctx.campaignId, version: 3 })).rejects.toThrow(/current version is 1/);
+  });
+});
+
+describe("CampaignEngine restart reconciliation", () => {
+  test("an unreachable remote during reconciliation puts the campaign in unknown and nothing starts until resume", async () => {
+    const ctx = await setup();
+    await ctx.engine.tick();
+    ctx.deliver("C");
+    ctx.store.campaigns.beginOperation(ctx.campaignId, `merge:${ctx.campaignId}:C:0`, "merge_card", { cardId: "C", prUrl: ctx.ticketOf("C").prUrl });
+    const restarted = ctx.makeEngine();
+    const readPr = ctx.vcs.readPr.bind(ctx.vcs);
+    ctx.vcs.readPr = () => Promise.reject(new Error("gh: network unreachable"));
+    restarted.start(60_000);
+    await restarted.stop();
+    const unknown = ctx.store.campaigns.require(ctx.campaignId);
+    expect(unknown.status).toBe("unknown");
+    expect(unknown.runtime.reconciliationError).toContain("network");
+    const startsBefore = ctx.slots.started.length;
+    await restarted.tick();
+    expect(ctx.slots.started.length).toBe(startsBefore);
+    ctx.vcs.readPr = readPr;
+    const resumed = await restarted.resume(ctx.campaignId, null);
+    expect(resumed.status).toBe("running");
+    expect(resumed.runtime.reconciledAt).not.toBeNull();
   });
 });

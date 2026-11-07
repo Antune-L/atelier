@@ -57,6 +57,7 @@ export const CAMPAIGN_ENGINE_EVENT = {
   resumed: "resumed",
   cancelled: "cancelled",
   reported: "reported",
+  reconciliationFailed: "reconciliation_failed",
   error: "engine_error",
 } as const;
 
@@ -126,6 +127,7 @@ export class CampaignEngine {
 
   start(intervalMs = CAMPAIGN_TICK_MS): void {
     if (this.timer !== null) return;
+    this.reconcilePending = true;
     this.timer = setInterval(() => this.wake(), intervalMs);
     this.timer.unref();
     this.wake();
@@ -157,7 +159,40 @@ export class CampaignEngine {
     return this.chain;
   }
 
+  private reconcilePending = false;
+
+  /**
+   * After a restart, confirm every journaled effect whose outcome is unknown before anything new starts.
+   * A failure puts the campaign in `unknown`: nothing starts until an explicit resume (FR10).
+   */
+  private async reconcileJournal(): Promise<void> {
+    for (const campaign of this.store.campaigns.listExecuting()) {
+      if (campaign.status === "unknown") continue;
+      try {
+        const project = this.deps.project(campaign.project);
+        for (const operation of this.store.campaigns.listOperations(campaign.id, "intent")) {
+          const payload = operation.payload;
+          if (operation.kind === "merge_card" && typeof payload === "object" && payload !== null && "prUrl" in payload && typeof payload.prUrl === "string") {
+            await this.deps.vcs.readPr(project.repoPath, payload.prUrl, project.vcsProvider);
+          }
+          if (operation.kind === "create_mother_branch" && campaign.motherBranch !== null) {
+            await this.deps.vcs.branchExists(project.repoPath, campaign.motherBranch);
+          }
+        }
+        this.updateRuntime(campaign.id, (runtime) => ({ ...runtime, reconciledAt: this.now(), reconciliationError: null }));
+      } catch (error) {
+        const message = getErrorMessage(error);
+        this.store.campaigns.update(campaign.id, { status: "unknown", runtime: { ...campaign.runtime, previousStatus: campaign.status, reconciliationError: message, statusReason: `Reconciliation after restart failed: ${message}` } }, this.now());
+        this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.reconciliationFailed, { message });
+      }
+    }
+  }
+
   private async pass(): Promise<void> {
+    if (this.reconcilePending) {
+      this.reconcilePending = false;
+      await this.reconcileJournal();
+    }
     for (const campaign of this.store.campaigns.listQueued()) await this.guard(campaign.id, () => this.promote(campaign));
     for (const campaign of this.store.campaigns.listExecuting()) await this.guard(campaign.id, () => this.advance(campaign.id));
     for (const campaign of this.store.campaigns.list()) {
@@ -278,6 +313,7 @@ export class CampaignEngine {
     if (base === null || mother === null) throw new Error("The campaign has no mother or base branch.");
     await this.suspendRunningCards(campaignId, "finalization started; the pull request stays open.");
     await this.stopIdleCardSessions(campaignId, "Campaign finalization started.");
+    await this.settlePendingMerges(campaignId);
     const cards = this.store.campaigns.listCards(campaignId);
     const merged = cards.filter((card) => card.state === "merged");
     const missing = plan.cards.filter((entry) => !merged.some((card) => card.cardId === entry.id)).map((entry) => `${entry.id}: ${entry.title}`);
@@ -312,6 +348,29 @@ export class CampaignEngine {
     });
     this.event(campaignId, CAMPAIGN_ENGINE_EVENT.finalizationStarted, { reason, ticketId: ticket.id, merged: merged.length, total: plan.cards.length });
     await this.startFinalTicket(campaignId, ticket.id);
+  }
+
+  /** No merge is emitted once finalization starts; a merge still journaled as intent is confirmed on GitHub or closed as not merged. */
+  private async settlePendingMerges(campaignId: string): Promise<void> {
+    const campaign = this.store.campaigns.require(campaignId);
+    const project = this.deps.project(campaign.project);
+    for (const operation of this.store.campaigns.listOperations(campaignId, "intent")) {
+      if (operation.kind !== "merge_card") continue;
+      const card = this.store.campaigns.listCards(campaignId).find((entry) => operation.id.startsWith(`merge:${campaignId}:${entry.cardId}:`));
+      const ticket = card?.ticketId ? this.store.getTicket(card.ticketId) : null;
+      if (!card || !ticket || ticket.prUrl === null) {
+        this.store.campaigns.completeOperation(operation.id, "failed", { reason: "finalization started" }, this.now());
+        continue;
+      }
+      const snapshot = await this.deps.vcs.readPr(project.repoPath, ticket.prUrl, project.vcsProvider);
+      if (snapshot.state === "merged" && snapshot.baseBranch === campaign.motherBranch) {
+        this.store.campaigns.completeOperation(operation.id, "done", { mergeCommitSha: snapshot.mergeCommitSha, reconciled: true }, this.now());
+        await this.deps.slots.markMerged(ticket.id);
+        this.recordMerged(campaign, card, this.store.getTicket(ticket.id) ?? ticket, snapshot.mergeCommitSha);
+      } else {
+        this.store.campaigns.completeOperation(operation.id, "failed", { reason: "finalization started before the merge", state: snapshot.state }, this.now());
+      }
+    }
   }
 
   private async startFinalTicket(campaignId: string, ticketId: string): Promise<void> {
@@ -840,7 +899,12 @@ export class CampaignEngine {
   }
 
   /** Stop starts and merges; a merge already emitted finishes first because passes are serialized (FR12). */
+  private assertStarted(): void {
+    if (this.timer === null) throw new Error("Campaign execution is not started yet on this machine.");
+  }
+
   async requestPause(campaignId: string): Promise<Campaign> {
+    this.assertStarted();
     const campaign = this.store.campaigns.require(campaignId);
     if (campaign.status === "quota_paused") throw new Error("Pause is unavailable during a quota pause.");
     if (campaign.status !== "running" && campaign.status !== "finalizing") throw new Error(`A ${campaign.status} campaign cannot be paused.`);
@@ -860,6 +924,7 @@ export class CampaignEngine {
 
   /** End the campaign: merges already in the mother stay, branches and work are kept, sessions stop (FR12). */
   async cancel(campaignId: string): Promise<Campaign> {
+    this.assertStarted();
     await this.tick();
     const campaign = this.store.campaigns.require(campaignId);
     if (TERMINAL_CAMPAIGN_STATUSES.includes(campaign.status)) return campaign;
@@ -879,6 +944,12 @@ export class CampaignEngine {
   /** Resume a paused or reported campaign; after the deadline a new deadline and budget are mandatory (FR12). */
   async resume(campaignId: string, extension: { deadlineAt: string; additionalTokens: number } | null): Promise<Campaign> {
     const campaign = this.store.campaigns.require(campaignId);
+    if (campaign.status === "unknown") {
+      this.reconcilePending = true;
+      this.store.campaigns.update(campaignId, { status: campaign.runtime.previousStatus ?? "running", runtime: { ...campaign.runtime, previousStatus: null, reconciliationError: null, statusReason: null } }, this.now());
+      await this.tick();
+      return this.store.campaigns.require(campaignId);
+    }
     const resumable = campaign.status === "paused" || campaign.status === "awaiting_report" || campaign.status === "finished";
     if (!resumable) throw new Error(`A ${campaign.status} campaign cannot be resumed.`);
     const plan = this.approvedPlan(campaign);
@@ -888,6 +959,8 @@ export class CampaignEngine {
     if (extension !== null && Date.parse(extension.deadlineAt) <= now) throw new Error("The new deadline must be in the future.");
     const extensions = extension === null ? campaign.runtime.extensions : [...campaign.runtime.extensions, { ...extension, at: now }];
     const reopen = campaign.status !== "paused";
+    const oldPreview = campaign.runtime.finalization?.previewId ?? null;
+    if (reopen && oldPreview !== null && campaign.runtime.finalization?.previewCleanup !== "done") await this.deps.preview.stop(oldPreview);
     const status = reopen ? "running" : campaign.runtime.previousStatus === "finalizing" ? "finalizing" : "running";
     this.store.campaigns.update(campaignId, {
       status,

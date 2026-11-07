@@ -78,7 +78,7 @@ export interface CampaignEngineWiringDeps {
   system: Pick<SystemAdapter, "createBranchFromBase" | "fetch" | "readGitRef" | "readPr" | "mergePr">;
   slots: Pick<SlotManager, "startTicket" | "retry" | "markMerged" | "interruptForCampaign" | "resolveCampaignConflict" | "setCampaignHooks">;
   lifecycle: Pick<TicketLifecycle, "enqueue">;
-  notifier: Pick<Notifier, "silence">;
+  notifier: Pick<Notifier, "silence" | "notify">;
   service: CampaignService;
   sessionHub: Pick<SessionHub, "setQuotaRefusalListener">;
   quota(provider: QuotaProvider): Promise<ProviderQuota | null>;
@@ -117,6 +117,7 @@ export function buildCampaignEngine(deps: CampaignEngineWiringDeps): CampaignEng
     skillRoots: campaignSkillRoots(deps.dryRun, deps.dataRoot),
     readyToStart: (campaign) => deps.service.readyToStart(campaign),
     quota: deps.quota,
+    notify: (title, body) => void deps.notifier.notify(title, body, undefined, true),
     preview: { get: (id) => deps.store.getPreview(id), stop: async (id) => { await deps.previews.stop(id); } },
   });
   deps.sessionHub.setQuotaRefusalListener((ticketId, refusal) => engine.recordQuotaRefusal(ticketId, refusal));
@@ -126,5 +127,6 @@ export function buildCampaignEngine(deps: CampaignEngineWiringDeps): CampaignEng
     onDelivered: (ticketId, delivery) => engine.recordDelivery(ticketId, delivery),
   });
   deps.notifier.silence((ticketId) => engine.silences(ticketId));
+  deps.service.attachLifecycle(engine);
   return engine;
 }

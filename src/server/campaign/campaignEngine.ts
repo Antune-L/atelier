@@ -1,4 +1,4 @@
-import { TERMINAL_CAMPAIGN_STATUSES, campaignDescendants } from "../../shared/campaign.ts";
+import { TERMINAL_CAMPAIGN_STATUSES, campaignDescendants, effectiveSchedule } from "../../shared/campaign.ts";
 import type { Campaign, CampaignCard, CampaignCardPlan, CampaignFinalization, CampaignPlan, CampaignRuntime } from "../../shared/campaign.ts";
 import type { VcsProvider } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
@@ -16,6 +16,7 @@ import type { CampaignSkillRoots } from "./campaignSkills.ts";
 import { campaignCardDescription, campaignCardTicket, campaignFinalDescription, campaignFinalTicket, parseCampaignDecisions } from "./cardTicket.ts";
 import { consumedTokens, defectFingerprint, isEnvironmentIncident } from "./policies.ts";
 import { quotaAvailability } from "./quotaAvailability.ts";
+import { buildCampaignReport, campaignReportNotification } from "./report.ts";
 
 const log = createLogger("campaign");
 
@@ -51,6 +52,11 @@ export const CAMPAIGN_ENGINE_EVENT = {
   finalPullRequest: "final_pull_request",
   finalizationEnded: "finalization_ended",
   previewCleanup: "preview_cleanup",
+  pauseRequested: "pause_requested",
+  paused: "paused",
+  resumed: "resumed",
+  cancelled: "cancelled",
+  reported: "reported",
   error: "engine_error",
 } as const;
 
@@ -93,6 +99,8 @@ export interface CampaignEngineDeps {
   /** Observed provider quota; unknown or stale counts as unavailable (FR9). */
   quota(provider: QuotaProvider): Promise<ProviderQuota | null>;
   preview: CampaignPreviews;
+  /** The single aggregated notification of a campaign: its final report (FR11). */
+  notify(title: string, body: string): void;
   now?(): number;
   onChange?(campaignId: string): void;
 }
@@ -215,6 +223,14 @@ export class CampaignEngine {
       await this.advanceFinalization(campaign);
       return;
     }
+    if (campaign.status === "pausing") {
+      await this.completePause(campaign);
+      return;
+    }
+    if (campaign.status === "awaiting_report") {
+      if (this.now() >= effectiveSchedule(this.approvedPlan(campaign), campaign.runtime).reportAt) this.produceReport(campaign.id, "finished");
+      return;
+    }
     if (campaign.status !== "running") return;
     const plan = this.approvedPlan(campaign);
     const project = this.deps.project(campaign.project);
@@ -238,7 +254,7 @@ export class CampaignEngine {
     if (campaign.status !== "running") return null;
     const cards = this.store.campaigns.listCards(campaign.id).filter((card) => plan.cards.some((entry) => entry.id === card.cardId));
     if (cards.length === plan.cards.length && cards.every((card) => card.state === "merged")) return "all_merged";
-    if (this.now() >= Date.parse(plan.schedule.deadlineAt)) return "deadline";
+    if (this.now() >= effectiveSchedule(plan, campaign.runtime).deadlineAt) return "deadline";
     const active = cards.some((card) => ACTIVE_CARD_STATES.includes(card.state) || card.state === "suspended");
     if (active) return null;
     if (this.envelopeRemaining(campaign, plan) <= 0) return "budget";
@@ -275,7 +291,7 @@ export class CampaignEngine {
       prDraft: null,
       previewUrl: null,
       previewId: null,
-      previewKeepUntil: Date.parse(plan.schedule.reviewUntil),
+      previewKeepUntil: effectiveSchedule(plan, campaign.runtime).reviewUntil,
       previewCleanup: null,
       previewCleanupError: null,
       criteria: plan.globalCriteria.flatMap((criterion) => (criterion.id === undefined ? [] : [{ id: criterion.id, status: "missing" as const, evidence: null, revision: null }])),
@@ -290,7 +306,7 @@ export class CampaignEngine {
     const skills = readCampaignSkills(this.deps.skillRoots);
     const guidance = skills.map((fingerprint) => ({ name: fingerprint.name, fingerprint, instructions: readSkillInstructions(fingerprint.name, this.deps.skillRoots) }));
     const description = campaignFinalDescription(plan, mother, base, missing, guidance);
-    const { ticket } = this.store.createTicketIdempotent(`campaign:${campaignId}:final`, JSON.stringify({ campaign: campaignId, final: true }), campaignFinalTicket(plan, base, description, incomplete, now), (created) => {
+    const { ticket } = this.store.createTicketIdempotent(`campaign:${campaignId}:final:${campaign.runtime.extensions.length}`, JSON.stringify({ campaign: campaignId, final: campaign.runtime.extensions.length }), campaignFinalTicket(plan, base, description, incomplete, now), (created) => {
       this.store.campaigns.update(campaignId, { status: "finalizing", finalTicketId: created.id, runtime: { ...campaign.runtime, finalization: { ...finalization, prDraft: incomplete } } }, now);
     });
     this.event(campaignId, CAMPAIGN_ENGINE_EVENT.finalizationStarted, { reason, ticketId: ticket.id, merged: merged.length, total: plan.cards.length });
@@ -298,7 +314,7 @@ export class CampaignEngine {
   }
 
   private async startFinalTicket(campaignId: string, ticketId: string): Promise<void> {
-    const operationId = `start-final:${campaignId}`;
+    const operationId = `start-final:${campaignId}:${ticketId}`;
     const { operation } = this.store.campaigns.beginOperation(campaignId, operationId, "start_final", { ticketId }, this.now());
     if (operation.status === "done") return;
     const ticket = this.store.getTicket(ticketId);
@@ -359,7 +375,7 @@ export class CampaignEngine {
       this.endFinalization(campaign.id, ticket.error ?? "The final card stopped without a pull request.");
       return;
     }
-    if (reserveUsed > plan.budget.finalReserveTokens || this.now() >= Date.parse(plan.schedule.reportAt)) {
+    if (reserveUsed > plan.budget.finalReserveTokens || this.now() >= effectiveSchedule(plan, campaign.runtime).reportAt) {
       const cause = reserveUsed > plan.budget.finalReserveTokens ? "The final reserve is exhausted." : "The report time arrived before the final pull request.";
       await this.deps.slots.interruptForCampaign(ticket.id, cause);
       this.endFinalization(campaign.id, cause);
@@ -476,7 +492,7 @@ export class CampaignEngine {
     const plan = this.approvedPlan(campaign);
     const now = this.now();
     if (!plan.quotaPolicy.autoResume) return this.noteWaiting(campaign, "Quota exhausted; the plan does not allow an automatic resume.");
-    if (now >= Date.parse(plan.schedule.deadlineAt)) return this.noteWaiting(campaign, "Quota exhausted until after the deadline; no automatic resume.");
+    if (now >= effectiveSchedule(plan, campaign.runtime).deadlineAt) return this.noteWaiting(campaign, "Quota exhausted until after the deadline; no automatic resume.");
     if (this.envelopeRemaining(campaign, plan) <= 0) return this.noteWaiting(campaign, "Quota exhausted and no budget remains; no automatic resume.");
     if (pause.nextAttemptAt !== null && now < pause.nextAttemptAt) return;
     const availability = quotaAvailability(await this.deps.quota(pause.provider), now);
@@ -777,6 +793,112 @@ export class CampaignEngine {
 
   ownsMerge(ticketId: string): boolean {
     return this.store.campaigns.getCardByTicket(ticketId) !== null || this.store.campaigns.findByFinalTicket(ticketId) !== null;
+  }
+
+  private activeSessions(campaign: Campaign): number {
+    const tickets = [...this.store.campaigns.listCards(campaign.id).map((card) => card.ticketId), campaign.finalTicketId];
+    return tickets.filter((ticketId) => {
+      if (ticketId === null) return false;
+      const ticket = this.store.getTicket(ticketId);
+      return ticket !== null && ticket.column === "implementing" && ticket.stage !== "interrupted" && ticket.stage !== "stalled";
+    }).length;
+  }
+
+  /** Build the report from persisted state only, store it once and send the single aggregated notification (FR11). */
+  produceReport(campaignId: string, status: "finished" | "cancelled"): void {
+    const campaign = this.store.campaigns.require(campaignId);
+    if (campaign.runtime.reportSentAt !== null) return;
+    const plan = this.approvedPlan(campaign);
+    const version = campaign.approvedVersion === null ? null : this.store.campaigns.getVersion(campaign.id, campaign.approvedVersion);
+    const finalTicket = campaign.finalTicketId === null ? null : this.store.getTicket(campaign.finalTicketId);
+    const now = this.now();
+    const ended = { ...campaign, status, runtime: { ...campaign.runtime, endedAt: campaign.runtime.endedAt ?? now } };
+    const report = buildCampaignReport({
+      campaign: ended,
+      plan,
+      cards: this.store.campaigns.listCards(campaign.id),
+      operations: this.store.campaigns.listOperations(campaign.id),
+      skills: version?.skills ?? [],
+      activeSessions: this.activeSessions(campaign),
+      finalTokens: consumedTokens(finalTicket?.sessionUsage ?? null),
+      now,
+    });
+    this.store.campaigns.update(campaign.id, { status, report, runtime: { ...ended.runtime, reportSentAt: now } }, now);
+    this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.reported, { verdict: report.verdict });
+    const notification = campaignReportNotification(campaign, report);
+    this.deps.notify(notification.title, notification.body);
+  }
+
+  /** Stop starts and merges; a merge already emitted finishes first because passes are serialized (FR12). */
+  async requestPause(campaignId: string): Promise<Campaign> {
+    const campaign = this.store.campaigns.require(campaignId);
+    if (campaign.status === "quota_paused") throw new Error("Pause is unavailable during a quota pause.");
+    if (campaign.status !== "running" && campaign.status !== "finalizing") throw new Error(`A ${campaign.status} campaign cannot be paused.`);
+    this.store.campaigns.update(campaignId, { status: "pausing", runtime: { ...campaign.runtime, previousStatus: campaign.status, pauseRequestedAt: this.now() } }, this.now());
+    this.event(campaignId, CAMPAIGN_ENGINE_EVENT.pauseRequested);
+    await this.tick();
+    return this.store.campaigns.require(campaignId);
+  }
+
+  private async completePause(campaign: Campaign): Promise<void> {
+    await this.suspendRunningCards(campaign.id, "paused by the user.");
+    if (campaign.finalTicketId !== null) await this.deps.slots.interruptForCampaign(campaign.finalTicketId, "Campaign paused by the user.");
+    const current = this.store.campaigns.require(campaign.id);
+    this.store.campaigns.update(campaign.id, { status: "paused", runtime: { ...current.runtime, statusReason: "Paused by the user." } }, this.now());
+    this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.paused, { activeSessions: this.activeSessions(current) });
+  }
+
+  /** End the campaign: merges already in the mother stay, branches and work are kept, sessions stop (FR12). */
+  async cancel(campaignId: string): Promise<Campaign> {
+    await this.tick();
+    const campaign = this.store.campaigns.require(campaignId);
+    if (TERMINAL_CAMPAIGN_STATUSES.includes(campaign.status)) return campaign;
+    if (campaign.approvedVersion === null) {
+      this.store.campaigns.update(campaignId, { status: "cancelled" }, this.now());
+      this.event(campaignId, CAMPAIGN_ENGINE_EVENT.cancelled);
+      return this.store.campaigns.require(campaignId);
+    }
+    await this.suspendRunningCards(campaignId, "campaign cancelled.");
+    if (campaign.finalTicketId !== null) await this.deps.slots.interruptForCampaign(campaign.finalTicketId, "Campaign cancelled.");
+    this.event(campaignId, CAMPAIGN_ENGINE_EVENT.cancelled);
+    this.produceReport(campaignId, "cancelled");
+    return this.store.campaigns.require(campaignId);
+  }
+
+  /** Resume a paused or reported campaign; after the deadline a new deadline and budget are mandatory (FR12). */
+  async resume(campaignId: string, extension: { deadlineAt: string; additionalTokens: number } | null): Promise<Campaign> {
+    const campaign = this.store.campaigns.require(campaignId);
+    const resumable = campaign.status === "paused" || campaign.status === "awaiting_report" || campaign.status === "finished";
+    if (!resumable) throw new Error(`A ${campaign.status} campaign cannot be resumed.`);
+    const plan = this.approvedPlan(campaign);
+    const now = this.now();
+    const pastDeadline = now >= effectiveSchedule(plan, campaign.runtime).deadlineAt;
+    if ((pastDeadline || campaign.status !== "paused") && extension === null) throw new Error("Resuming after the deadline requires a new deadline and an additional budget.");
+    if (extension !== null && Date.parse(extension.deadlineAt) <= now) throw new Error("The new deadline must be in the future.");
+    const extensions = extension === null ? campaign.runtime.extensions : [...campaign.runtime.extensions, { ...extension, at: now }];
+    const reopen = campaign.status !== "paused";
+    const status = reopen ? "running" : campaign.runtime.previousStatus === "finalizing" ? "finalizing" : "running";
+    this.store.campaigns.update(campaignId, {
+      status,
+      finalTicketId: reopen ? null : campaign.finalTicketId,
+      report: reopen ? null : campaign.report,
+      runtime: { ...campaign.runtime, extensions, previousStatus: null, pauseRequestedAt: null, statusReason: null, reportSentAt: reopen ? null : campaign.runtime.reportSentAt, endedAt: reopen ? null : campaign.runtime.endedAt, finalization: reopen ? null : campaign.runtime.finalization },
+    }, now);
+    if (reopen) this.reopenBlockedCards(campaignId);
+    if (status === "finalizing" && campaign.finalTicketId !== null) await this.deps.slots.retry(campaign.finalTicketId);
+    this.event(campaignId, CAMPAIGN_ENGINE_EVENT.resumed, { status, extension });
+    this.wake();
+    return this.store.campaigns.require(campaignId);
+  }
+
+  /** Cards held only by the budget or the deadline can run again after an explicit extension. */
+  private reopenBlockedCards(campaignId: string): void {
+    for (const card of this.store.campaigns.listCards(campaignId)) {
+      if (card.state === "suspended" && (card.blockedReason ?? "").startsWith(PAUSED_CARD_PREFIX)) continue;
+      if (card.state === "blocked" && (card.blockedReason ?? "").startsWith("Sub-budget exhausted")) {
+        this.store.campaigns.updateCard(campaignId, card.cardId, { state: "suspended", blockedReason: `${PAUSED_CARD_PREFIX} resumed with an extension.` }, this.now());
+      }
+    }
   }
 
   /** Refuses any start, even manual, of a campaign card whose prerequisites are not merged into the mother (FR3). */

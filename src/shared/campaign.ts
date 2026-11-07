@@ -534,3 +534,20 @@ export const campaignReportSchema = z.object({
 });
 export type CampaignReport = z.infer<typeof campaignReportSchema>;
 
+
+export interface EffectiveSchedule {
+  deadlineAt: number;
+  reportAt: number;
+  reviewUntil: number;
+}
+
+/** Approved times, shifted by the latest explicit extension given when resuming after the deadline (FR12). */
+export function effectiveSchedule(plan: CampaignPlan, runtime: Pick<CampaignRuntime, "extensions">): EffectiveSchedule {
+  const deadlineAt = Date.parse(plan.schedule.deadlineAt);
+  const reportAt = Date.parse(plan.schedule.reportAt);
+  const reviewUntil = Date.parse(plan.schedule.reviewUntil);
+  const extension = runtime.extensions.at(-1);
+  if (extension === undefined) return { deadlineAt, reportAt, reviewUntil };
+  const shift = Math.max(0, Date.parse(extension.deadlineAt) - deadlineAt);
+  return { deadlineAt: deadlineAt + shift, reportAt: reportAt + shift, reviewUntil: reviewUntil + shift };
+}

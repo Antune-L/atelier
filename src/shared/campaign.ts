@@ -420,6 +420,8 @@ export const campaignRuntimeSchema = z.object({
   pauseRequestedAt: timestampSchema.nullable().default(null),
   quotaPause: campaignQuotaPauseSchema.nullable().default(null),
   quotaPausedMs: z.number().int().nonnegative().default(0),
+  quotaRefusals: z.number().int().nonnegative().default(0),
+  lastQuotaResumeAt: timestampSchema.nullable().default(null),
   finalization: campaignFinalizationSchema.nullable().default(null),
   decisions: z.array(campaignDecisionSchema).default([]),
   pendingQuestions: z.array(campaignPendingQuestionSchema).default([]),

@@ -48,6 +48,16 @@ export function resolveBaseBranch(ticket: Ticket, project: ProjectConfig, store:
   return { status: "ready", baseBranch: current.baseBranch ?? project.baseBranch };
 }
 
+/**
+ * Existing branch a ticket works on directly instead of forking its own (a campaign's final card adopts
+ * the mother branch). Its pull request target stays `ticket.baseBranch`, so work base and target differ.
+ */
+export function resolveAdoptedWorkBranch(ticket: Ticket, store: Store): string | null {
+  const campaign = store.campaigns.findByFinalTicket(ticket.id);
+  if (campaign === null || campaign.motherBranch === null) return null;
+  return campaign.motherBranch;
+}
+
 export function resolveAnalysisBaseBranch(ticket: Ticket, project: ProjectConfig, store: Store): string {
   const resolved = resolveBaseBranch(ticket, project, store);
   return resolved.status === "ready" ? resolved.baseBranch : ticket.baseBranch ?? project.baseBranch;

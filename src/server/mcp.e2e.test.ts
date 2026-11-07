@@ -1106,7 +1106,7 @@ test("an MCP client submits, checks and approves a campaign idempotently, then r
   const replayed = z.object({ campaignId: z.string() }).parse(structuredContent(await client.callTool({ name: "submit_campaign_plan", arguments: { requestId: "campaign-e2e-1", plan } })));
   expect(replayed.campaignId).toBe(submitted.campaignId);
 
-  const cyclic = { ...plan, cards: (plan.cards ?? []).map((card) => (card.id === "A" ? { ...card, dependsOn: ["B"] } : card)) };
+  const cyclic = { ...plan, cards: plan.cards.map((card) => (card.id === "A" ? { ...card, dependsOn: ["B"] } : card)) };
   const refused = errorResultSchema.parse(textContent(await client.callTool({ name: "submit_campaign_plan", arguments: { requestId: "campaign-e2e-2", plan: cyclic } })));
   expect(refused.error.code).toBe("INVALID_INPUT");
   expect(refused.error.message).toContain("cycle");
@@ -1209,4 +1209,3 @@ test("rotating the token immediately rejects the old token and accepts the new t
     await rotatedTransport.close();
   }
 });
-

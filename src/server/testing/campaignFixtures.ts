@@ -1,5 +1,7 @@
 import type { CampaignCriterion, CampaignPlanInput } from "../../shared/campaign.ts";
 
+import { FIXTURE_PROJECT_KEY } from "./fixtures.ts";
+
 export function makeCriterion(id: string): CampaignCriterion {
   return {
     id,
@@ -15,7 +17,7 @@ const HOUR_MS = 3_600_000;
 
 export function makeCampaignPlan(overrides: Partial<CampaignPlanInput> = {}, now = Date.now()): CampaignPlanInput {
   return {
-    project: "test-proj",
+    project: FIXTURE_PROJECT_KEY,
     title: "Night campaign",
     cards: [
       { id: "A", title: "Card A", description: "Do A", dependsOn: [], budgetTokens: 100_000, criteria: [makeCriterion("A1")] },

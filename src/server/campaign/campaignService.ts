@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import {
   CAMPAIGN_STATUSES,
-  EXECUTING_CAMPAIGN_STATUSES,
   TERMINAL_CAMPAIGN_STATUSES,
   campaignApprovalBlockers,
   campaignMotherBranch,
@@ -101,6 +100,14 @@ function invalid(issues: readonly CampaignPlanIssue[]): TicketOperationError {
   return new TicketOperationError("INVALID_INPUT", issues.map((issue) => `${issue.code}${issue.path ? ` (${issue.path})` : ""}: ${issue.message}`).join(" | "));
 }
 
+function staleVersion(requested: number, current: number): TicketOperationError {
+  return new TicketOperationError("CONFLICT", `stale version ${requested}; current version is ${current}.`);
+}
+
+function assertNotTerminal(campaign: Campaign): void {
+  if (TERMINAL_CAMPAIGN_STATUSES.includes(campaign.status)) throw new TicketOperationError("CONFLICT", `campaign ${campaign.id} is ${campaign.status}.`);
+}
+
 /** Plan intake, readiness, approval and reads; execution belongs to the campaign engine. */
 export class CampaignService {
   private readonly inflight = new Map<string, Promise<unknown>>();
@@ -165,10 +172,8 @@ export class CampaignService {
           return { campaign, version: this.store.addVersion(campaign.id, plan, plan.versionReason || "initial plan", now), previous: null };
         }
         const campaign = this.requireCampaign(input.campaignId);
-        if (TERMINAL_CAMPAIGN_STATUSES.includes(campaign.status)) throw new TicketOperationError("CONFLICT", `campaign ${campaign.id} is ${campaign.status}.`);
-        if (input.baseVersion !== undefined && input.baseVersion !== campaign.currentVersion) {
-          throw new TicketOperationError("CONFLICT", `stale version ${input.baseVersion}; current version is ${campaign.currentVersion}.`);
-        }
+        assertNotTerminal(campaign);
+        if (input.baseVersion !== undefined && input.baseVersion !== campaign.currentVersion) throw staleVersion(input.baseVersion, campaign.currentVersion);
         if (plan.project !== campaign.project) throw new TicketOperationError("INVALID_INPUT", "A campaign cannot change project.");
         const previous = this.store.requireVersion(campaign.id, campaign.currentVersion).plan;
         return { campaign, version: this.store.addVersion(campaign.id, plan, plan.versionReason || `version ${campaign.currentVersion + 1}`, now), previous };
@@ -239,12 +244,12 @@ export class CampaignService {
     const resultSchema = z.object({ campaignId: z.string(), version: z.number(), status: z.enum(CAMPAIGN_STATUSES), skills: z.array(campaignSkillFingerprintSchema) });
     return this.once(input.requestId, "approve_campaign", resultSchema, async () => {
       const campaign = this.requireCampaign(input.campaignId);
-      if (input.version !== campaign.currentVersion) throw new TicketOperationError("CONFLICT", `stale version ${input.version}; current version is ${campaign.currentVersion}.`);
+      if (input.version !== campaign.currentVersion) throw staleVersion(input.version, campaign.currentVersion);
       if (campaign.approvedVersion === input.version) {
         const skills = this.store.requireVersion(campaign.id, input.version).skills ?? [];
         return { campaignId: campaign.id, result: { campaignId: campaign.id, version: input.version, status: campaign.status, skills } };
       }
-      if (TERMINAL_CAMPAIGN_STATUSES.includes(campaign.status)) throw new TicketOperationError("CONFLICT", `campaign ${campaign.id} is ${campaign.status}.`);
+      assertNotTerminal(campaign);
       const version = this.store.requireVersion(campaign.id, input.version);
       const blockers = campaignApprovalBlockers(version.plan);
       if (blockers.length > 0) throw invalid(blockers);
@@ -257,7 +262,7 @@ export class CampaignService {
       const now = this.now();
       const approved = this.store.runInTransaction(() => {
         const current = this.requireCampaign(campaign.id);
-        if (current.currentVersion !== input.version) throw new TicketOperationError("CONFLICT", `stale version ${input.version}; current version is ${current.currentVersion}.`);
+        if (current.currentVersion !== input.version) throw staleVersion(input.version, current.currentVersion);
         this.store.setVersionSkills(campaign.id, input.version, skills);
         const baseRevision = readiness.items.find((entry) => entry.id === "base_drift")?.detail.revision;
         const firstApproval = current.approvedVersion === null;
@@ -318,6 +323,6 @@ export class CampaignService {
 
   /** Another campaign is executing on the same project (one executing campaign per repository, FR5). */
   executingOn(project: string, excluding: string): Campaign | null {
-    return this.store.listExecuting().find((campaign) => campaign.project === project && campaign.id !== excluding && EXECUTING_CAMPAIGN_STATUSES.includes(campaign.status)) ?? null;
+    return this.store.listExecuting().find((campaign) => campaign.project === project && campaign.id !== excluding) ?? null;
   }
 }

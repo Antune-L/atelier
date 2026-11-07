@@ -1,7 +1,7 @@
 const URL_PATTERN = /https?:\/\/[^\s"'<>]+/g;
 
 /** Strip credentials, query strings and fragments from a URL so no identifier or token leaks (FR13). */
-export function redactUrl(raw: string): string {
+function redactUrl(raw: string): string {
   try {
     const url = new URL(raw);
     url.username = "";

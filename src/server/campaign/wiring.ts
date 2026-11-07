@@ -1,6 +1,5 @@
 import { join } from "node:path";
 
-import { EXECUTING_CAMPAIGN_STATUSES } from "../../shared/campaign.ts";
 import type { PreviewReadiness } from "../../shared/preview.ts";
 import type { ProviderQuota, QuotaProvider } from "../../shared/providerQuota.ts";
 import { getProject, isProjectKey } from "../config.ts";
@@ -22,7 +21,7 @@ function maxActivePreviews(): number {
 }
 
 /** Dry-run campaigns read and write skills under the data root so tests never touch the user's skill folders. */
-export function campaignSkillRoots(dryRun: boolean, dataRoot: string): CampaignSkillRoots {
+function campaignSkillRoots(dryRun: boolean, dataRoot: string): CampaignSkillRoots {
   if (!dryRun) return defaultCampaignSkillRoots();
   const claude = join(dataRoot, "campaign-skills", "claude");
   const agents = join(dataRoot, "campaign-skills", "agents");
@@ -53,7 +52,7 @@ export function buildCampaignService(deps: CampaignWiringDeps): CampaignService 
       previewReadiness: deps.previewReadiness,
       occupiedPreviewSlots: (excluding) => {
         const active = store.listPreviews().filter((preview) => preview.cleanupStatus !== "complete").length;
-        const reserved = store.campaigns.listExecuting().filter((campaign) => campaign.id !== excluding && EXECUTING_CAMPAIGN_STATUSES.includes(campaign.status) && campaign.runtime.finalization?.previewId == null).length
+        const reserved = store.campaigns.listExecuting().filter((campaign) => campaign.id !== excluding && campaign.runtime.finalization?.previewId == null).length
           + store.campaigns.listQueued().filter((campaign) => campaign.id !== excluding).length;
         return active + reserved;
       },

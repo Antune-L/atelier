@@ -16,8 +16,6 @@ const MAX_SKILL_FILES = 200;
 const MAX_SKILL_BYTES = 2_000_000;
 const GIT_CLONE_TIMEOUT_MS = 120_000;
 
-export type CampaignSkillName = (typeof CAMPAIGN_REQUIRED_SKILLS)[number];
-
 export interface CampaignSkillRoots {
   /** Directories written on install, one per provider (Claude first). */
   install: readonly string[];
@@ -52,7 +50,7 @@ function listFiles(root: string, current = root): string[] {
 }
 
 /** Content fingerprint of a skill folder: sha256 over sorted relative paths and file bytes. */
-export function fingerprintSkillFiles(files: readonly { path: string; content: Buffer }[]): string {
+function fingerprintSkillFiles(files: readonly { path: string; content: Buffer }[]): string {
   const hash = createHash("sha256");
   for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
     hash.update(file.path);
@@ -67,7 +65,7 @@ function readSkillDir(dir: string): { path: string; content: Buffer }[] {
   return listFiles(dir).map((path) => ({ path, content: readFileSync(join(dir, path)) }));
 }
 
-export function locateSkill(name: string, roots: CampaignSkillRoots): string | null {
+function locateSkill(name: string, roots: CampaignSkillRoots): string | null {
   for (const root of roots.search) {
     const dir = join(root, name);
     if (existsSync(join(dir, SKILL_MANIFEST_FILE))) return dir;
@@ -86,17 +84,6 @@ export function readCampaignSkills(roots: CampaignSkillRoots): CampaignSkillFing
       return { name, sha256: null, path: null, source: "internal" };
     }
   });
-}
-
-/** SKILL.md content to inject into a campaign session, or null when the internal guidance applies. */
-export function readSkillInstructions(name: string, roots: CampaignSkillRoots): string | null {
-  const dir = locateSkill(name, roots);
-  if (dir === null) return null;
-  try {
-    return readFileSync(join(dir, SKILL_MANIFEST_FILE), "utf8");
-  } catch {
-    return null;
-  }
 }
 
 function safeRelativePath(path: string): string | null {

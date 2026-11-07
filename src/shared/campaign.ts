@@ -434,7 +434,6 @@ export const campaignRuntimeSchema = z.object({
   approvedBaseRevision: z.string().nullable().default(null),
 });
 export type CampaignRuntime = z.infer<typeof campaignRuntimeSchema>;
-export const EMPTY_CAMPAIGN_RUNTIME: CampaignRuntime = campaignRuntimeSchema.parse({});
 
 export const campaignRepairSchema = z.object({
   fingerprint: z.string().min(1),

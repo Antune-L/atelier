@@ -108,7 +108,7 @@ export const CAMPAIGN_TOOLS = [
 
 export const CAMPAIGN_TOOL_NAMES: readonly string[] = CAMPAIGN_TOOLS.map((tool) => tool.name);
 
-export interface CampaignToolOutput {
+interface CampaignToolOutput {
   schema: { safeParse(value: unknown): { success: true; data: Record<string, unknown> } | { success: false } };
   value: Record<string, unknown>;
 }

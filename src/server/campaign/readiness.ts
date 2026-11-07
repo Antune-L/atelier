@@ -86,7 +86,7 @@ async function quotaItem(plan: CampaignPlan, deps: CampaignReadinessDeps): Promi
 function skillItems(deps: CampaignReadinessDeps): CampaignReadinessItem[] {
   const fingerprints = readCampaignSkills(deps.skillRoots);
   return CAMPAIGN_REQUIRED_SKILLS.map((name) => {
-    const id = name === "simplifier" ? "skill:simplifier" : "skill:argus-review";
+    const id: CampaignReadinessItem["id"] = `skill:${name}`;
     const fingerprint = fingerprints.find((entry) => entry.name === name);
     if (fingerprint?.source === "installed") return item(id, "ok", null, { sha256: fingerprint.sha256, path: fingerprint.path });
     const action: CampaignReadinessItem["action"] = {

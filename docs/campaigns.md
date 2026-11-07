@@ -21,7 +21,7 @@ Scope of the first version: the VPS only, GitHub only, one executing campaign pe
 - `cancel_campaign` — ends the campaign; merges already in the mother, branches and work are kept and the report is produced.
 - `get_campaign` — status, plan, versions, cards, report and the events after `cursor`; pass the returned cursor to read only new changes. `list_campaigns` lists them.
 
-Every command takes a `requestId`; replays return the first result. A command naming a stale `version` is refused with the current one. URLs in responses carry no credentials, query string or fragment.
+Every tool that changes state (`submit_campaign_plan`, `install_campaign_skill`, `approve_campaign`, `pause_campaign`, `resume_campaign`, `cancel_campaign`) takes a `requestId`; replays return the first result. A command naming a stale `version` is refused with the current one. URLs in responses carry no credentials, query string or fragment.
 
 ## Quota and capacity
 
@@ -29,4 +29,4 @@ A quota refusal (a rejected Claude rate-limit window, or a session error naming 
 
 ## Restart
 
-Every remote effect is journaled before it is emitted. After a restart the engine re-reads the journal: a merge whose outcome is unknown is checked on GitHub before any retry, a started card is not started again, and a final card is created only once.
+Every remote effect is journaled before it is emitted. After a restart the engine re-reads the journal: a merge whose outcome is unknown is checked on GitHub before any retry, a started card is not started again, and a final card is created only once. When the remote cannot be read during that check, the campaign shows the `unknown` status and nothing starts until `resume_campaign`, which restores the previous status and checks the journal again.

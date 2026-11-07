@@ -842,7 +842,7 @@ stage_campaigns() {
   ensure_unit_file deploy/vps/kanban.service.d/campaigns.conf /etc/systemd/system/kanban.service.d/campaigns.conf Campaigns restart_kanban
 }
 
-# Prints what the service actually runs with: memory limit, drop-ins and campaign settings from the units or the env file (an upgrade never reinstalls drop-ins).
+# Prints what the service actually runs with: memory limit, drop-ins and campaign settings (the env file overrides the units, as in systemd; an upgrade never reinstalls drop-ins).
 effective_config() {
   local memory_max drop_ins environment key value
   memory_max="$(systemctl show "$SERVICE" -p MemoryMax --value 2>/dev/null || true)"
@@ -851,8 +851,8 @@ effective_config() {
   report ok Config "MemoryMax" "${memory_max:-unknown}"
   report ok Config "drop-ins" "${drop_ins:-none}"
   for key in KANBAN_AUTONOMOUS_PILOT KANBAN_MAX_IMPLEMENTERS KANBAN_IMPLEMENTER_MEMORY_MB KANBAN_MEMORY_RESERVE_MB KANBAN_MIN_FREE_DISK_MB KANBAN_PREVIEW_MAX_ACTIVE; do
-    value="$(tr ' ' '\n' <<<"$environment" | sed -n "s/^$key=//p" | tail -n 1)"
-    [[ -n "$value" ]] || value="$(env_value "$key")"
+    value="$(env_value "$key")"
+    [[ -n "$value" ]] || value="$(tr ' ' '\n' <<<"$environment" | sed -n "s/^$key=//p" | tail -n 1)"
     report ok Config "$key" "${value:-default}"
   done
   value="$(env_value KANBAN_SLOTS)"

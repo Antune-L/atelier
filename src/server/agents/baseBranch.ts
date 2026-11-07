@@ -53,9 +53,7 @@ export function resolveBaseBranch(ticket: Ticket, project: ProjectConfig, store:
  * the mother branch). Its pull request target stays `ticket.baseBranch`, so work base and target differ.
  */
 export function resolveAdoptedWorkBranch(ticket: Ticket, store: Store): string | null {
-  const campaign = store.campaigns.findByFinalTicket(ticket.id);
-  if (campaign === null || campaign.motherBranch === null) return null;
-  return campaign.motherBranch;
+  return store.campaigns.findByFinalTicket(ticket.id)?.motherBranch ?? null;
 }
 
 export function resolveAnalysisBaseBranch(ticket: Ticket, project: ProjectConfig, store: Store): string {

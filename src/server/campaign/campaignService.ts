@@ -10,6 +10,7 @@ import {
   campaignPlanIssueSchema,
   campaignSkillFingerprintSchema,
   changedCampaignCards,
+  missingCriterionResult,
   validateCampaignPlan,
 } from "../../shared/campaign.ts";
 import type {
@@ -203,7 +204,7 @@ export class CampaignService {
     }
     const runtime = campaign.runtime;
     const finalization = touched.has("__global__") && runtime.finalization
-      ? { ...runtime.finalization, criteria: runtime.finalization.criteria.map((criterion) => ({ ...criterion, status: "missing" as const, evidence: null, revision: null })) }
+      ? { ...runtime.finalization, criteria: runtime.finalization.criteria.map((criterion) => missingCriterionResult(criterion.id)) }
       : runtime.finalization;
     this.store.update(campaign.id, { runtime: { ...runtime, finalization, statusReason: `Version ${version} awaits approval.` } }, now);
     this.store.appendEvent(campaign.id, CAMPAIGN_EVENT.cardsSuspended, { version, cards: suspended, globalCriteriaInvalidated: touched.has("__global__") }, now);

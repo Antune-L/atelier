@@ -15,6 +15,14 @@ function criterionBlock(criterion: CampaignCriterion): string {
   ].join("\n");
 }
 
+function criteriaBlocks(criteria: readonly CampaignPlan["globalCriteria"][number][]): string {
+  return criteria.flatMap((criterion) => {
+    const { id, data, role, actions, observableResult, proofMethod } = criterion;
+    if (id === undefined || data === undefined || role === undefined || actions === undefined || observableResult === undefined || proofMethod === undefined) return [];
+    return [criterionBlock({ id, data, role, actions, observableResult, proofMethod })];
+  }).join("\n");
+}
+
 function listOrNone(items: readonly string[]): string {
   return items.length === 0 ? "- none" : items.map((item) => `- ${item}`).join("\n");
 }
@@ -32,12 +40,6 @@ function guidanceBlock(guidance: CardSkillGuidance): string {
 
 /** Card brief: scope, verifiable criteria, the plan's rules for autonomous decisions, and the skill guidance read for this campaign (FR4, FR14). */
 export function campaignCardDescription(plan: CampaignPlan, card: CampaignCardPlan, motherBranch: string, guidance: readonly CardSkillGuidance[]): string {
-  const criteria = card.criteria.flatMap((criterion) => {
-    const id = criterion.id;
-    const complete = [criterion.data, criterion.role, criterion.actions, criterion.observableResult, criterion.proofMethod];
-    if (id === undefined || complete.some((value) => value === undefined)) return [];
-    return [criterionBlock({ id, data: criterion.data ?? "", role: criterion.role ?? "", actions: criterion.actions ?? "", observableResult: criterion.observableResult ?? "", proofMethod: criterion.proofMethod ?? "" })];
-  });
   return [
     card.description,
     "",
@@ -47,7 +49,7 @@ export function campaignCardDescription(plan: CampaignPlan, card: CampaignCardPl
     "",
     "### Verifiable criteria",
     "",
-    criteria.join("\n"),
+    criteriaBlocks(card.criteria),
     "",
     "### Accepted assumptions",
     "",
@@ -125,11 +127,6 @@ const MINUTE_MS = 60_000;
 
 /** Brief of the final card: validate the adopted mother branch and open the pull request to the base (FR6, FR7). */
 export function campaignFinalDescription(plan: CampaignPlan, motherBranch: string, baseBranch: string, missingCards: readonly string[], guidance: readonly CardSkillGuidance[]): string {
-  const criteria = plan.globalCriteria.flatMap((criterion) => {
-    const { id, data, role, actions, observableResult, proofMethod } = criterion;
-    if (id === undefined || data === undefined || role === undefined || actions === undefined || observableResult === undefined || proofMethod === undefined) return [];
-    return [criterionBlock({ id, data, role, actions, observableResult, proofMethod })];
-  });
   return [
     `Finalize the campaign "${plan.title}".`,
     "",
@@ -143,7 +140,7 @@ export function campaignFinalDescription(plan: CampaignPlan, motherBranch: strin
     "",
     "### Global criteria",
     "",
-    criteria.join("\n"),
+    criteriaBlocks(plan.globalCriteria),
     "",
     "### Cards not merged into the campaign branch",
     "",

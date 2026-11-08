@@ -1,4 +1,4 @@
-import { TERMINAL_CAMPAIGN_STATUSES, campaignDescendants } from "../../shared/campaign.ts";
+import { TERMINAL_CAMPAIGN_STATUSES, campaignDescendants, missingCriterionResult, missingGlobalCriteria } from "../../shared/campaign.ts";
 import type { Campaign, CampaignCard, CampaignCardPlan, CampaignFinalization, CampaignPlan, CampaignRepair, CampaignRuntime } from "../../shared/campaign.ts";
 import type { VcsProvider } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
@@ -14,6 +14,7 @@ import type { PrSnapshot } from "../system/vcs/types.ts";
 import { readCampaignSkills, readSkillInstructions } from "./campaignSkills.ts";
 import type { CampaignSkillRoots } from "./campaignSkills.ts";
 import { campaignCardDescription, campaignCardTicket, campaignFinalDescription, campaignFinalTicket, parseCampaignDecisions } from "./cardTicket.ts";
+import type { CardSkillGuidance } from "./cardTicket.ts";
 import { consumedTokens, defectFingerprint, isEnvironmentIncident } from "./policies.ts";
 import { quotaAvailability } from "./quotaAvailability.ts";
 
@@ -95,6 +96,12 @@ export interface CampaignEngineDeps {
   preview: CampaignPreviews;
   now?(): number;
   onChange?(campaignId: string): void;
+}
+
+function skippedFinalizationCause(mergedCount: number, incomplete: boolean, partialDelivery: CampaignPlan["partialDelivery"]): string | null {
+  if (mergedCount === 0) return "No change was merged into the mother branch; no pull request is opened.";
+  if (incomplete && partialDelivery === "report_only") return "The campaign is incomplete and the plan asks for the report only.";
+  return null;
 }
 
 function repairCount(card: CampaignCard, fingerprint: string): number {
@@ -291,18 +298,16 @@ export class CampaignEngine {
       previewKeepUntil: Date.parse(plan.schedule.reviewUntil),
       previewCleanup: null,
       previewCleanupError: null,
-      criteria: plan.globalCriteria.flatMap((criterion) => (criterion.id === undefined ? [] : [{ id: criterion.id, status: "missing" as const, evidence: null, revision: null }])),
+      criteria: missingGlobalCriteria(plan),
       reserveUsedTokens: 0,
     };
-    const skip = merged.length === 0 ? "No change was merged into the mother branch; no pull request is opened." : incomplete && plan.partialDelivery === "report_only" ? "The campaign is incomplete and the plan asks for the report only." : null;
+    const skip = skippedFinalizationCause(merged.length, incomplete, plan.partialDelivery);
     if (skip !== null) {
       this.store.campaigns.update(campaignId, { status: "awaiting_report", runtime: { ...campaign.runtime, finalization, endedAt: now, statusReason: skip } }, now);
       this.event(campaignId, CAMPAIGN_ENGINE_EVENT.finalizationSkipped, { reason, cause: skip });
       return;
     }
-    const skills = readCampaignSkills(this.deps.skillRoots);
-    const guidance = skills.map((fingerprint) => ({ name: fingerprint.name, fingerprint, instructions: readSkillInstructions(fingerprint.name, this.deps.skillRoots) }));
-    const description = campaignFinalDescription(plan, mother, base, missing, guidance);
+    const description = campaignFinalDescription(plan, mother, base, missing, this.skillGuidance());
     const { ticket } = this.store.createTicketIdempotent(`campaign:${campaignId}:final`, JSON.stringify({ campaign: campaignId, final: true }), campaignFinalTicket(plan, base, description, incomplete, now), (created) => {
       this.store.campaigns.update(campaignId, { status: "finalizing", finalTicketId: created.id, runtime: { ...campaign.runtime, finalization: { ...finalization, prDraft: incomplete } } }, now);
     });
@@ -357,13 +362,14 @@ export class CampaignEngine {
       criteria: this.criteriaResults(ticket, finalization),
     };
     const published = state?.phase === "completed" || state?.phase === "published_partial";
-    if (published && ticket.prUrl !== null) {
-      next.prUrl = ticket.prUrl;
+    const finalPrUrl = published ? ticket.prUrl : null;
+    if (finalPrUrl !== null) {
+      next.prUrl = finalPrUrl;
       next.prDraft = state?.phase === "published_partial" ? true : ticket.prDraft;
     }
     this.updateRuntime(campaign.id, (runtime) => ({ ...runtime, finalization: next }));
-    if (published && ticket.prUrl !== null) {
-      if (finalization.prUrl === null) this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.finalPullRequest, { prUrl: ticket.prUrl, draft: next.prDraft, revision: next.frozenRevision });
+    if (finalPrUrl !== null) {
+      if (finalization.prUrl === null) this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.finalPullRequest, { prUrl: finalPrUrl, draft: next.prDraft, revision: next.frozenRevision });
       this.endFinalization(campaign.id, null);
       return;
     }
@@ -372,8 +378,9 @@ export class CampaignEngine {
       this.endFinalization(campaign.id, ticket.error ?? "The final card stopped without a pull request.");
       return;
     }
-    if (reserveUsed > plan.budget.finalReserveTokens || this.now() >= Date.parse(plan.schedule.reportAt)) {
-      const cause = reserveUsed > plan.budget.finalReserveTokens ? "The final reserve is exhausted." : "The report time arrived before the final pull request.";
+    const reserveExhausted = reserveUsed > plan.budget.finalReserveTokens;
+    if (reserveExhausted || this.now() >= Date.parse(plan.schedule.reportAt)) {
+      const cause = reserveExhausted ? "The final reserve is exhausted." : "The report time arrived before the final pull request.";
       await this.deps.slots.interruptForCampaign(ticket.id, cause);
       this.endFinalization(campaign.id, cause);
     }
@@ -383,13 +390,14 @@ export class CampaignEngine {
   private criteriaResults(ticket: Ticket, finalization: CampaignFinalization): CampaignFinalization["criteria"] {
     const revision = ticket.autonomousState?.revision ?? null;
     const runId = ticket.autonomousState?.previewRunId ?? null;
-    if (revision === null || runId === null) return finalization.criteria.map((criterion) => ({ ...criterion, status: "missing", evidence: null, revision: null }));
+    const unproven = finalization.criteria.map((criterion) => missingCriterionResult(criterion.id));
+    if (revision === null || runId === null) return unproven;
     const quality = this.store.getTicketQuality(ticket.id);
     const run = quality.runs.find((entry) => entry.id === runId);
-    if (!run || run.simulated || run.revision !== revision) return finalization.criteria.map((criterion) => ({ ...criterion, status: "missing", evidence: null, revision: null }));
+    if (!run || run.simulated || run.revision !== revision) return unproven;
     return finalization.criteria.map((criterion) => {
       const evidence = quality.evidence.filter((entry) => entry.runId === runId && entry.criterionId === criterion.id).at(-1);
-      if (!evidence) return { ...criterion, status: "missing", evidence: null, revision: null };
+      if (!evidence) return missingCriterionResult(criterion.id);
       return { ...criterion, status: evidence.status, evidence: evidence.artifactPath ?? evidence.summary, revision };
     });
   }
@@ -516,9 +524,12 @@ export class CampaignEngine {
     return mother;
   }
 
+  private skillGuidance(): CardSkillGuidance[] {
+    return readCampaignSkills(this.deps.skillRoots).map((fingerprint) => ({ name: fingerprint.name, fingerprint, instructions: readSkillInstructions(fingerprint.name, this.deps.skillRoots) }));
+  }
+
   private ensureCards(campaign: Campaign, plan: CampaignPlan, mother: string): void {
-    const skills = readCampaignSkills(this.deps.skillRoots);
-    const guidance = skills.map((fingerprint) => ({ name: fingerprint.name, fingerprint, instructions: readSkillInstructions(fingerprint.name, this.deps.skillRoots) }));
+    const guidance = this.skillGuidance();
     for (const planCard of plan.cards) {
       const card = this.store.campaigns.upsertCard(campaign.id, planCard.id, campaign.approvedVersion ?? 1, this.now());
       if (card.ticketId !== null || card.state === "stopped") continue;

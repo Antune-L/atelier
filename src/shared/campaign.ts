@@ -367,6 +367,16 @@ export const campaignFinalizationSchema = z.object({
 });
 export type CampaignFinalization = z.infer<typeof campaignFinalizationSchema>;
 
+export type CampaignCriterionResult = CampaignFinalization["criteria"][number];
+
+export function missingCriterionResult(id: string): CampaignCriterionResult {
+  return { id, status: "missing", evidence: null, revision: null };
+}
+
+export function missingGlobalCriteria(plan: Pick<CampaignPlan, "globalCriteria">): CampaignCriterionResult[] {
+  return plan.globalCriteria.flatMap((criterion) => (criterion.id === undefined ? [] : [missingCriterionResult(criterion.id)]));
+}
+
 export const campaignExtensionSchema = z.object({
   deadlineAt: isoDateSchema,
   additionalTokens: z.number().int().positive(),

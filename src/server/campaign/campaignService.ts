@@ -7,8 +7,10 @@ import {
   campaignMotherBranch,
   campaignPlanSchema,
   campaignReadinessSchema,
+  campaignPlanIssueSchema,
   campaignSkillFingerprintSchema,
   changedCampaignCards,
+  missingCriterionResult,
   validateCampaignPlan,
 } from "../../shared/campaign.ts";
 import type {
@@ -21,6 +23,7 @@ import type {
   CampaignSkillFingerprint,
   CampaignVersion,
 } from "../../shared/campaign.ts";
+import { getErrorMessage } from "../../shared/errors.ts";
 import type { CampaignStore } from "../db/campaignStore.ts";
 import { TicketOperationError } from "../ticketOperations.ts";
 
@@ -38,10 +41,11 @@ export const CAMPAIGN_EVENT = {
 } as const;
 
 const requestIdSchema = z.string().trim().min(1).max(200);
+const campaignIdSchema = z.string().trim().min(1);
 
 export const submitCampaignPlanInputSchema = z.object({
   requestId: requestIdSchema,
-  campaignId: z.string().trim().min(1).optional(),
+  campaignId: campaignIdSchema.optional(),
   baseVersion: z.number().int().nonnegative().optional(),
   plan: z.unknown(),
 });
@@ -49,18 +53,18 @@ export type SubmitCampaignPlanInput = z.infer<typeof submitCampaignPlanInputSche
 
 export const approveCampaignInputSchema = z.object({
   requestId: requestIdSchema,
-  campaignId: z.string().trim().min(1),
+  campaignId: campaignIdSchema,
   version: z.number().int().positive(),
 });
 
 export const checkCampaignReadinessInputSchema = z.object({
-  campaignId: z.string().trim().min(1),
+  campaignId: campaignIdSchema,
   version: z.number().int().positive().optional(),
 });
 
 export const installCampaignSkillInputSchema = z.object({
   requestId: requestIdSchema,
-  campaignId: z.string().trim().min(1),
+  campaignId: campaignIdSchema,
   skill: z.string().trim().min(1),
   source: z.discriminatedUnion("type", [
     z.object({ type: z.literal("paired_machine"), files: z.array(skillFileSchema).min(1) }),
@@ -71,7 +75,7 @@ export const installCampaignSkillInputSchema = z.object({
 
 const commandBaseSchema = z.object({
   requestId: requestIdSchema,
-  campaignId: z.string().trim().min(1),
+  campaignId: campaignIdSchema,
   version: z.number().int().positive().optional(),
 });
 export const pauseCampaignInputSchema = commandBaseSchema;
@@ -89,11 +93,11 @@ export interface CampaignLifecycle {
   resume(campaignId: string, extension: { deadlineAt: string; additionalTokens: number } | null): Promise<Campaign>;
 }
 
-const commandResultSchema = z.object({ campaignId: z.string(), status: z.enum(CAMPAIGN_STATUSES), statusReason: z.string().nullable() });
+export const commandResultSchema = z.object({ campaignId: z.string(), status: z.enum(CAMPAIGN_STATUSES), statusReason: z.string().nullable() });
 export type CampaignCommandResult = z.infer<typeof commandResultSchema>;
 
 export const getCampaignInputSchema = z.object({
-  campaignId: z.string().trim().min(1),
+  campaignId: campaignIdSchema,
   cursor: z.number().int().nonnegative().optional(),
 });
 
@@ -123,8 +127,13 @@ function invalid(issues: readonly CampaignPlanIssue[]): TicketOperationError {
   return new TicketOperationError("INVALID_INPUT", issues.map((issue) => `${issue.code}${issue.path ? ` (${issue.path})` : ""}: ${issue.message}`).join(" | "));
 }
 
-function staleVersion(requested: number, current: number): TicketOperationError {
-  return new TicketOperationError("CONFLICT", `stale version ${requested}; current version is ${current}.`);
+/** A command naming a stale version is refused with the current one (FR13). */
+function assertCurrentVersion(campaign: Campaign, version: number | undefined): void {
+  if (version !== undefined && version !== campaign.currentVersion) throw new TicketOperationError("CONFLICT", `stale version ${version}; current version is ${campaign.currentVersion}.`);
+}
+
+function blockedReadinessSummary(readiness: CampaignReadiness): string {
+  return readiness.items.filter((entry) => entry.status === "blocked").map((entry) => `${entry.id}: ${entry.cause ?? "blocked"}`).join(" | ");
 }
 
 function assertNotTerminal(campaign: Campaign): void {
@@ -148,21 +157,16 @@ export class CampaignService {
     return this.lifecycle;
   }
 
-  /** A command naming a stale version is refused with the current one (FR13). */
-  private assertCurrentVersion(campaign: Campaign, version: number | undefined): void {
-    if (version !== undefined && version !== campaign.currentVersion) throw staleVersion(version, campaign.currentVersion);
-  }
-
   private async command(name: string, input: z.infer<typeof commandBaseSchema>, run: (campaign: Campaign) => Promise<Campaign>): Promise<CampaignCommandResult> {
     return this.once(input.requestId, name, commandResultSchema, async () => {
       const campaign = this.requireCampaign(input.campaignId);
-      this.assertCurrentVersion(campaign, input.version);
+      assertCurrentVersion(campaign, input.version);
       let updated: Campaign;
       try {
         updated = await run(campaign);
       } catch (error) {
         if (error instanceof TicketOperationError) throw error;
-        throw new TicketOperationError("CONFLICT", error instanceof Error ? error.message : String(error));
+        throw new TicketOperationError("CONFLICT", getErrorMessage(error));
       }
       return { campaignId: campaign.id, result: { campaignId: campaign.id, status: updated.status, statusReason: updated.runtime.statusReason } };
     });
@@ -228,7 +232,7 @@ export class CampaignService {
   }
 
   async submitPlan(input: SubmitCampaignPlanInput): Promise<{ campaignId: string; version: number; approvalBlockers: CampaignPlanIssue[] }> {
-    const resultSchema = z.object({ campaignId: z.string(), version: z.number(), approvalBlockers: z.array(z.object({ code: z.string(), message: z.string(), path: z.string().optional() })) });
+    const resultSchema = z.object({ campaignId: z.string(), version: z.number(), approvalBlockers: z.array(campaignPlanIssueSchema) });
     return this.once(input.requestId, "submit_campaign_plan", resultSchema, () => {
       const plan = this.parsePlan(input.plan);
       const now = this.now();
@@ -239,7 +243,7 @@ export class CampaignService {
         }
         const campaign = this.requireCampaign(input.campaignId);
         assertNotTerminal(campaign);
-        if (input.baseVersion !== undefined && input.baseVersion !== campaign.currentVersion) throw staleVersion(input.baseVersion, campaign.currentVersion);
+        assertCurrentVersion(campaign, input.baseVersion);
         if (plan.project !== campaign.project) throw new TicketOperationError("INVALID_INPUT", "A campaign cannot change project.");
         const previous = this.store.requireVersion(campaign.id, campaign.currentVersion).plan;
         return { campaign, version: this.store.addVersion(campaign.id, plan, plan.versionReason || `version ${campaign.currentVersion + 1}`, now), previous };
@@ -262,7 +266,7 @@ export class CampaignService {
     }
     const runtime = campaign.runtime;
     const finalization = touched.has("__global__") && runtime.finalization
-      ? { ...runtime.finalization, criteria: runtime.finalization.criteria.map((criterion) => ({ ...criterion, status: "missing" as const, evidence: null, revision: null })) }
+      ? { ...runtime.finalization, criteria: runtime.finalization.criteria.map((criterion) => missingCriterionResult(criterion.id)) }
       : runtime.finalization;
     this.store.update(campaign.id, { runtime: { ...runtime, finalization, statusReason: `Version ${version} awaits approval.` } }, now);
     this.store.appendEvent(campaign.id, CAMPAIGN_EVENT.cardsSuspended, { version, cards: suspended, globalCriteriaInvalidated: touched.has("__global__") }, now);
@@ -293,8 +297,7 @@ export class CampaignService {
   async readyToStart(campaign: Campaign): Promise<{ ready: boolean; reason: string | null }> {
     if (campaign.approvedVersion === null) return { ready: false, reason: "The campaign has no approved version." };
     const readiness = await this.checkReadiness({ campaignId: campaign.id, version: campaign.approvedVersion }, campaign.runtime.approvedBaseRevision);
-    const blocked = readiness.items.filter((entry) => entry.status === "blocked");
-    return { ready: readiness.ready, reason: blocked.length === 0 ? null : blocked.map((entry) => `${entry.id}: ${entry.cause ?? "blocked"}`).join(" | ") };
+    return { ready: readiness.ready, reason: blockedReadinessSummary(readiness) || null };
   }
 
   async installSkill(input: z.infer<typeof installCampaignSkillInputSchema>): Promise<{ outcome: SkillInstallOutcome; readiness: CampaignReadiness | null }> {
@@ -318,7 +321,7 @@ export class CampaignService {
     const resultSchema = z.object({ campaignId: z.string(), version: z.number(), status: z.enum(CAMPAIGN_STATUSES), skills: z.array(campaignSkillFingerprintSchema) });
     return this.once(input.requestId, "approve_campaign", resultSchema, async () => {
       const campaign = this.requireCampaign(input.campaignId);
-      if (input.version !== campaign.currentVersion) throw staleVersion(input.version, campaign.currentVersion);
+      assertCurrentVersion(campaign, input.version);
       if (campaign.approvedVersion === input.version) {
         const skills = this.store.requireVersion(campaign.id, input.version).skills ?? [];
         return { campaignId: campaign.id, result: { campaignId: campaign.id, version: input.version, status: campaign.status, skills } };
@@ -328,15 +331,12 @@ export class CampaignService {
       const blockers = campaignApprovalBlockers(version.plan);
       if (blockers.length > 0) throw invalid(blockers);
       const readiness = await this.checkReadiness({ campaignId: campaign.id, version: input.version });
-      if (!readiness.ready) {
-        const blocked = readiness.items.filter((entry) => entry.status === "blocked");
-        throw new TicketOperationError("CONFLICT", `campaign is not ready: ${blocked.map((entry) => `${entry.id}: ${entry.cause ?? "blocked"}`).join(" | ")}`);
-      }
+      if (!readiness.ready) throw new TicketOperationError("CONFLICT", `campaign is not ready: ${blockedReadinessSummary(readiness)}`);
       const skills = readCampaignSkills(this.deps.skillRoots);
       const now = this.now();
       const approved = this.store.runInTransaction(() => {
         const current = this.requireCampaign(campaign.id);
-        if (current.currentVersion !== input.version) throw staleVersion(input.version, current.currentVersion);
+        assertCurrentVersion(current, input.version);
         this.store.setVersionSkills(campaign.id, input.version, skills);
         const baseRevision = readiness.items.find((entry) => entry.id === "base_drift")?.detail.revision;
         const firstApproval = current.approvedVersion === null;
@@ -393,10 +393,5 @@ export class CampaignService {
 
   list(project?: string): Campaign[] {
     return this.store.list(project);
-  }
-
-  /** Another campaign is executing on the same project (one executing campaign per repository, FR5). */
-  executingOn(project: string, excluding: string): Campaign | null {
-    return this.store.listExecuting().find((campaign) => campaign.project === project && campaign.id !== excluding) ?? null;
   }
 }

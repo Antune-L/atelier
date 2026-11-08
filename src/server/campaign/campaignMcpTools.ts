@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { campaignPlanSchema, campaignReadinessSchema, CAMPAIGN_STATUSES } from "../../shared/campaign.ts";
+import { campaignPlanIssueSchema, campaignPlanSchema, campaignReadinessSchema, CAMPAIGN_REQUIRED_SKILLS, CAMPAIGN_STATUSES } from "../../shared/campaign.ts";
 import { TicketOperationError } from "../ticketOperations.ts";
 
 import { skillFileSchema, skillInstallOutcomeSchema, SKILLZER_PINNED_COMMIT } from "./campaignSkills.ts";
@@ -8,6 +8,7 @@ import {
   approveCampaignInputSchema,
   cancelCampaignInputSchema,
   checkCampaignReadinessInputSchema,
+  commandResultSchema,
   getCampaignInputSchema,
   installCampaignSkillInputSchema,
   pauseCampaignInputSchema,
@@ -18,7 +19,6 @@ import type { CampaignService } from "./campaignService.ts";
 import { redactCampaignUrls } from "./redaction.ts";
 
 const looseObject = z.record(z.string(), z.unknown());
-const issueSchema = z.object({ code: z.string(), message: z.string(), path: z.string().optional() });
 
 const submitInputDoc = z.object({
   requestId: z.string().describe("Persistent idempotent identifier chosen by the client; replaying it returns the first result."),
@@ -26,14 +26,14 @@ const submitInputDoc = z.object({
   baseVersion: z.number().int().optional().describe("Version the client edited; a stale value is refused with the current version."),
   plan: campaignPlanSchema.describe("Structured campaign plan: cards with prerequisites and criteria, global criteria, attachments, assumptions, questions, exclusions, budget, schedule and policies."),
 });
-const submitOutputSchema = z.object({ campaignId: z.string(), version: z.number().int(), approvalBlockers: z.array(issueSchema), dryRun: z.boolean() });
+const submitOutputSchema = z.object({ campaignId: z.string(), version: z.number().int(), approvalBlockers: z.array(campaignPlanIssueSchema), dryRun: z.boolean() });
 
 const readinessOutputSchema = z.object({ readiness: campaignReadinessSchema, dryRun: z.boolean() });
 
 const installInputDoc = z.object({
   requestId: z.string(),
   campaignId: z.string(),
-  skill: z.enum(["simplifier", "argus-review"]),
+  skill: z.enum(CAMPAIGN_REQUIRED_SKILLS),
   source: z.discriminatedUnion("type", [
     z.object({ type: z.literal("paired_machine"), files: z.array(skillFileSchema).describe("Complete skill folder copied from the other paired machine (relative paths, base64 content).") }),
     z.object({ type: z.literal("skillzer"), commit: z.string().default(SKILLZER_PINNED_COMMIT).describe("skillzer commit to copy from.") }),
@@ -54,14 +54,14 @@ const getOutputSchema = z.object({
   campaign: looseObject,
   plan: looseObject,
   versions: z.array(looseObject),
-  approvalBlockers: z.array(issueSchema),
+  approvalBlockers: z.array(campaignPlanIssueSchema),
   cards: z.array(looseObject),
   events: z.array(looseObject),
   cursor: z.number().int(),
   dryRun: z.boolean(),
 });
 
-const commandOutputSchema = z.object({ campaignId: z.string(), status: z.enum(CAMPAIGN_STATUSES), statusReason: z.string().nullable(), dryRun: z.boolean() });
+const commandOutputSchema = commandResultSchema.extend({ dryRun: z.boolean() });
 
 const listInputSchema = z.object({ project: z.string().optional() });
 const listOutputSchema = z.object({ campaigns: z.array(looseObject), dryRun: z.boolean() });

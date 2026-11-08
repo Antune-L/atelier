@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { getErrorMessage } from "../../shared/errors.ts";
 import { runBoundedCommand, safeJsonParse } from "../system/boundedCommand.ts";
 import { runGithubCommand } from "../system/github/accountEnv.ts";
 import { readGithubRepoRef } from "../system/vcs/github.ts";
@@ -131,7 +132,7 @@ export class GithubCampaignRepositoryProbe implements CampaignRepositoryProbe {
     try {
       ref = await readGithubRepoRef(repoPath);
     } catch (error) {
-      return failed(error instanceof Error ? error.message : String(error));
+      return failed(getErrorMessage(error));
     }
     const fetch = await runBoundedCommand(["git", "-C", repoPath, "fetch", "--quiet", "origin", baseBranch], repoPath);
     if (fetch.exitCode !== 0 || fetch.timedOut) return failed(`git fetch origin ${baseBranch} failed: ${fetch.stderr.trim()}`);

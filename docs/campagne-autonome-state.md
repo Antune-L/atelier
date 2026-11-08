@@ -18,7 +18,8 @@
 | T10 VPS config and docs | `feat/campagne-t10-ops` | #278 | T7 |
 | T4 memory admission | `feat/campagne-t4-memory-admission` | #272 | `main` |
 
-- Every PR had a simplifier pass and a regression-check before opening; each review found and fixed real defects (listed in the PR bodies).
+- Each PR had a review before opening that found and fixed real defects (listed in the PR bodies). The per-PR simplifier reports are confirmed only for T1, T2, T3, T4, T7 and T9.
+- 2026-11-08: explicit simplifier pass over the whole stack (`main` to T10), committed on T2, T3, T5, T6 and T7 and merged upward without rewriting history. T1, T9 and T10 needed no change. T4 was out of this pass.
 - Next action: wait for the user's decisions (merge order, VPS steps of T10, T8 real run); nothing on the VPS was touched.
 
 ## Design decisions (verified against the code)
@@ -38,7 +39,7 @@
 
 ## Checks (latest)
 
-- Stack tip (T10): typecheck and lint pass; `bun test` 971 pass, 3 skip, 0 fail.
+- Stack tip (T10), after the simplifier pass: typecheck and lint pass; `bun test` 971 pass, 3 skip, 0 fail. T2, T3, T5, T6 and T7 were each checked with typecheck, lint on the touched code and the campaign tests.
 - T4: 925 pass, 3 skip, 0 fail.
 - Everything above is simulated (fake system, fake GitHub, fake slots). No real provider, GitHub or Coolify run has been done.
 

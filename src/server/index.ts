@@ -496,6 +496,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     projectRoot: dataRoot,
     resourcesRoot,
     composerAvailable,
+    implementerCapacity: () => delegationManager.implementerCapacityState(),
     repoRoot: opts.repoRoot,
     repoMutex,
     desktopUpdates: opts.desktopUpdates,
@@ -687,6 +688,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       sessionHub.disconnectAll();
       await sessionHub.drainClosingSessions();
       await delegationManager.drainClosingSessions();
+      delegationManager.stopCapacityRetry();
       db.close();
     },
   };

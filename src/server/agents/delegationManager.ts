@@ -3,7 +3,7 @@ import { posix } from "node:path";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
-import { DELEGATION_SLOT_ID, MAX_GLOBAL_IMPLEMENTERS, MAX_PARALLEL_IMPLEMENTERS, TERMINAL_STAGES } from "../../shared/constants.ts";
+import { DELEGATION_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, TERMINAL_STAGES } from "../../shared/constants.ts";
 import type { Orchestrator } from "../../shared/constants.ts";
 import type { CommitLanguage } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
@@ -22,6 +22,8 @@ import { createLogger } from "../logger.ts";
 import { KeyedMutex } from "../mutex.ts";
 import type { AgentSessionEvent, AgentSessionHandle, AgentTurnUsage } from "../system/agentSession.ts";
 import { implementationFailureDiagnostic } from "../system/delegationWorkspace.ts";
+import { createImplementerCapacity } from "../system/implementerCapacity.ts";
+import type { CapacityBlock, ImplementerCapacity, ImplementerCapacityState } from "../system/implementerCapacity.ts";
 import type { CodeSnapshot, DoneGateResult, ImplementationLotOptions, SystemAdapter } from "../system/types.ts";
 
 import {
@@ -65,6 +67,8 @@ const MAX_CHANGED_PATHS = 30;
 const MAX_INFRASTRUCTURE_ATTEMPTS = 2;
 const MAX_IMPLEMENTATION_ATTEMPTS = 2;
 const RECOVERY_ASSESSMENT_TIMEOUT_MS = 300_000;
+// NOTE(ali): Memory and disk can free without any reservation release, so lots waiting on them are retried on this period.
+const CAPACITY_RETRY_MS = 15_000;
 const recoveryCoverageSchema = z.object({
   coverage: z.array(z.object({ label: z.string().min(1), covered: z.boolean(), evidence: z.string().trim().min(1) })),
 });
@@ -114,6 +118,10 @@ function recoveryCoverageProblems(input: {
 /** Transcript prefix marking lines produced by one delegated child lot (vs the parent session). */
 function childTranscriptPrefix(label: string, provider: Orchestrator): string {
   return `⟨${provider}:${label}⟩ `;
+}
+
+function isReadyPlanLot(plan: ImplementationPlan, lot: ImplementationPlanLot): boolean {
+  return lot.status === "pending" && lot.dependsOn.every((dependency) => plan.lots.some((candidate) => candidate.label === dependency && candidate.status === "completed"));
 }
 
 function normalizeImplementationScope(files: readonly string[]): string[] | null {
@@ -423,13 +431,16 @@ export class DelegationManager {
   private readonly generations = new Map<string, number>();
   private readonly closingExecutions = new Set<Promise<void>>();
   private readonly closingByTicket = new Map<string, Set<Promise<void>>>();
-  private readonly implementationReservations = new Set<string>();
+  private readonly implementationReservations = new Map<string, number>();
   private readonly implementationPlans = new Map<string, number>();
   private readonly recoveringImplementations = new Set<string>();
   private readonly queuedImplementations = new Map<string, QueuedImplementation>();
   private readonly implementationResumes = new Map<string, Promise<void>>();
   private implementationScheduling = false;
   private implementationScheduleQueued = false;
+  private capacityRetryTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly capacity: ImplementerCapacity;
+  private readonly capacityRetryMs: number;
   private readonly recoveryOperations = new Map<string, Promise<{ ok: boolean; result: string }>>();
   private readonly recoveryAssessments = new Map<string, ClosableExecution>();
   private readonly unclosedWriters = new Set<string>();
@@ -444,7 +455,10 @@ export class DelegationManager {
     private readonly hub: ClientHub,
     private readonly closeTimeoutMs = CHILD_CLOSE_TIMEOUT_MS,
     private readonly repoMutex = new KeyedMutex(),
+    implementers: { capacity?: ImplementerCapacity; retryMs?: number } = {},
   ) {
+    this.capacity = implementers.capacity ?? createImplementerCapacity();
+    this.capacityRetryMs = implementers.retryMs ?? CAPACITY_RETRY_MS;
     this.reviewPublisher = new ReviewPublisher({
       store,
       system,
@@ -943,15 +957,51 @@ export class DelegationManager {
     });
   }
 
+  implementerCapacityState(): ImplementerCapacityState {
+    let readyPlanLots = 0;
+    for (const ticketId of this.implementationPlans.keys()) {
+      const plan = this.store.getImplementationPlan(ticketId);
+      readyPlanLots += plan?.lots.filter((lot) => isReadyPlanLot(plan, lot)).length ?? 0;
+    }
+    return this.capacity.state([...this.implementationReservations.values()], this.queuedImplementations.size + readyPlanLots);
+  }
+
+  private implementerCapacityBlock(): CapacityBlock | null {
+    return this.capacity.blockedReason([...this.implementationReservations.values()]);
+  }
+
+  private syncCapacityRetry(blocked: CapacityBlock | null): void {
+    const waiting = this.queuedImplementations.size > 0 || this.implementationPlans.size > 0;
+    if ((blocked === "memory" || blocked === "disk") && waiting) {
+      if (this.capacityRetryTimer === null) {
+        this.capacityRetryTimer = setInterval(() => this.queueImplementationSchedule(), this.capacityRetryMs);
+        this.capacityRetryTimer.unref();
+      }
+      return;
+    }
+    this.stopCapacityRetry();
+  }
+
+  stopCapacityRetry(): void {
+    if (this.capacityRetryTimer === null) return;
+    clearInterval(this.capacityRetryTimer);
+    this.capacityRetryTimer = null;
+  }
+
   private scheduleImplementationPlans(): void {
     if (this.implementationScheduling) return;
     this.implementationScheduling = true;
+    let blocked: CapacityBlock | null = null;
+    const admits = (): boolean => {
+      blocked = this.implementerCapacityBlock();
+      return blocked === null;
+    };
     try {
       let launched = true;
-      while (launched && this.implementationReservations.size < MAX_GLOBAL_IMPLEMENTERS) {
+      while (launched && admits()) {
         launched = false;
         for (const [key, queued] of this.queuedImplementations) {
-          if (this.implementationReservations.size >= MAX_GLOBAL_IMPLEMENTERS) break;
+          if (!admits()) break;
           const ticket = this.store.getTicket(queued.ticket.id);
           if (!ticket || !this.sessionHub.getExecutionConfig(ticket.id)) {
             this.queuedImplementations.delete(key);
@@ -975,7 +1025,7 @@ export class DelegationManager {
           });
         }
         for (const [ticketId, slotId] of [...this.implementationPlans]) {
-          if (this.implementationReservations.size >= MAX_GLOBAL_IMPLEMENTERS) break;
+          if (!admits()) break;
           const ticket = this.store.getTicket(ticketId);
           const plan = this.store.getImplementationPlan(ticketId);
           if (!ticket || !plan || plan.recovery || plan.status === "interrupted" || plan.status === "cancelled" || !this.sessionHub.getExecutionConfig(ticketId)) {
@@ -984,7 +1034,7 @@ export class DelegationManager {
           }
           if (!this.canScheduleImplementation(ticket)) continue;
           if (this.lotCount(ticketId) >= plan.maxParallel) continue;
-          const ready = plan.lots.find((lot) => lot.status === "pending" && lot.dependsOn.every((dependency) => plan.lots.some((candidate) => candidate.label === dependency && candidate.status === "completed")));
+          const ready = plan.lots.find((lot) => isReadyPlanLot(plan, lot));
           if (!ready) continue;
           this.updatePlannedLot(ticketId, plan.id, ready.label, { status: "running" });
           const started = this.launchImplementation(ticket, slotId, ready.plan, ready.label, ready.files);
@@ -1008,6 +1058,7 @@ export class DelegationManager {
       }
     } finally {
       this.implementationScheduling = false;
+      this.syncCapacityRetry(blocked);
     }
   }
 
@@ -1371,6 +1422,12 @@ export class DelegationManager {
     return started;
   }
 
+  private capacityWaitReason(blocked: CapacityBlock): string {
+    if (blocked === "memory") return "que la mémoire du service couvre un implémenteur de plus et sa réserve";
+    if (blocked === "disk") return "que l'espace disque libre repasse au-dessus du seuil";
+    return `la capacité globale de ${this.capacity.config.ceiling} implémenteurs`;
+  }
+
   private async startNow(ticket: Ticket, slotId: number, plan: string, label: string, files: readonly string[]): Promise<{ ok: boolean; result: string }> {
     const executionGuard = createAutonomousSessionGuard(this.store, ticket.id, "implementation");
     this.store.assertAutonomousWork(ticket.id);
@@ -1423,11 +1480,13 @@ export class DelegationManager {
         result: `Limite de ${MAX_PARALLEL_IMPLEMENTERS} lots d'implémentation en parallèle atteinte pour ce ticket : attends les événements implementation_done en cours avant d'en lancer un autre.`,
       };
     }
-    if (this.implementationReservations.size >= MAX_GLOBAL_IMPLEMENTERS) {
+    const blocked = this.implementerCapacityBlock();
+    if (blocked !== null) {
       this.store.saveImplementationQueue(ticket.id, [...this.store.getImplementationQueue(ticket.id), { label, plan, files: normalizedFiles, slotId, started: false, executionRunId: null }]);
       this.queuedImplementations.set(`${ticket.id}:${label}`, { ticket, slotId, plan, label, files: normalizedFiles });
-      this.store.logEvent(ticket.id, "delegation_queued", { label, files: normalizedFiles });
-      return { ok: true, result: `Le lot «${label}» attend la capacité globale de ${MAX_GLOBAL_IMPLEMENTERS} implémenteurs. Le backend le lancera automatiquement. Termine ton tour et attends implementation_done.` };
+      this.store.logEvent(ticket.id, "delegation_queued", { label, files: normalizedFiles, reason: blocked });
+      this.syncCapacityRetry(blocked);
+      return { ok: true, result: `Le lot «${label}» attend ${this.capacityWaitReason(blocked)}. Le backend le lancera automatiquement. Termine ton tour et attends implementation_done.` };
     }
     const persistedPlan = this.store.getImplementationPlan(ticket.id);
     let queuedLot = this.store.getImplementationQueue(ticket.id).find((lot) => lot.label === label);
@@ -1453,7 +1512,7 @@ export class DelegationManager {
       }
     }
     const reservationId = nanoid(16);
-    this.implementationReservations.add(reservationId);
+    this.implementationReservations.set(reservationId, Date.now());
     this.recoveringImplementations.delete(`${ticket.id}:${label}`);
     const epoch = this.reviewEpochs.get(ticket.id) ?? 0;
     const startingKey = `${ticket.id}:${label}`;

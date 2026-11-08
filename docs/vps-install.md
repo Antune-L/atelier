@@ -164,6 +164,15 @@ sudo journalctl -u kanban -n 50 --no-pager
 
 Let your admin account open the interface socket: `sudo usermod -aG kanban "$USER"`, then log out and back in.
 
+**Implementer capacity (optional).** Without these lines, at most 4 delegated implementers run at once, as before. Set them in `/etc/kanban/kanban.env`, then restart the service:
+
+- `KANBAN_MAX_IMPLEMENTERS` (default 4): ceiling of simultaneous implementers across all cards. Up to 4 start as before; each one above 4 starts only when the service cgroup's free memory (`memory.max` minus `memory.current` without reclaimable page cache, tightest ancestor wins) covers one more implementer plus the reserve. Lots started in the last minute count at their estimated footprint because the cgroup does not show them yet.
+- `KANBAN_IMPLEMENTER_MEMORY_MB` (default 1536): estimated memory of one implementer, agent CLI plus the installs, typechecks and tests it runs.
+- `KANBAN_MEMORY_RESERVE_MB` (default 1024): memory kept free for reviews, validations and builds.
+- `KANBAN_MIN_FREE_DISK_MB` (default 2048): no implementer starts while the disk holding the worktrees has less free space; `0` disables the check.
+
+A lot that cannot start waits in the queue and starts on its own when capacity returns; nothing is refused. When the cgroup is unreadable (no cgroup v2 or no memory limit), the ceiling applies without a memory check. An invalid value falls back to its default and is logged once. `GET /api/implementer-capacity` returns the ceiling, the memory source (`cgroup` or `static`), memory, reserve, free disk, active and queued lots, the blocking reason (`ceiling`, `memory`, `disk` or `null`) and the invalid settings.
+
 ### A6. Open the board from the Mac
 
 ```bash

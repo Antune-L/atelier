@@ -19,6 +19,7 @@ import {
 import { getErrorMessage } from "../shared/errors.ts";
 import { terminalViewportSchema } from "../shared/schemas.ts";
 
+import { captureSourceRevision, createApplicationVersionReader } from "./applicationVersion.ts";
 import { AtelierManager } from "./agents/atelierManager.ts";
 import { buildCampaignEngine, buildCampaignService } from "./campaign/wiring.ts";
 import { AutonomousWorkflow } from "./agents/autonomousWorkflow.ts";
@@ -77,6 +78,7 @@ import { VpsLinkSync } from "./vpsLinkSync.ts";
 import { WorkerMcpManager } from "./workerMcp.ts";
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const BOOT_SOURCE_REVISION = captureSourceRevision(PROJECT_ROOT);
 
 /** Subpath, relative to resourcesRoot, holding the built web UI served as a static SPA. */
 const WEB_DIST_SUBPATH = join("dist", "web");
@@ -110,6 +112,7 @@ function resolveDataFile(explicitRoot: string | undefined, filename: string, env
  */
 export interface StartServerOptions {
   desktopUpdates?: DesktopUpdateController;
+  desktopVersion?: string;
   beforeRecovery?: () => Promise<void>;
   deferRecovery?: boolean;
   port?: number;
@@ -448,6 +451,12 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       mcpToken,
       system.dryRun,
       campaignService,
+      createApplicationVersionReader({
+        sourceRevision: BOOT_SOURCE_REVISION,
+        desktopVersion: opts.desktopVersion,
+        desktopUpdates: opts.desktopUpdates,
+        cloud: isCloudHost(),
+      }),
     );
 
   await opts.beforeRecovery?.();

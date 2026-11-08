@@ -6,6 +6,8 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import type { CallToolRequest } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
+import { applicationVersionInputSchema, applicationVersionSchema } from "../shared/applicationVersion.ts";
+import type { ApplicationVersion } from "../shared/applicationVersion.ts";
 import { COLUMNS, REVIEW_OUTCOMES, VCS_PROVIDERS } from "../shared/constants.ts";
 import {
   analyzeTicketsSchema,
@@ -17,6 +19,7 @@ import {
   updateTicketSchema,
 } from "../shared/schemas.ts";
 
+import { createApplicationVersionReader } from "./applicationVersion.ts";
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import { CAMPAIGN_TOOLS, runCampaignTool } from "./campaign/campaignMcpTools.ts";
 import type { CampaignService } from "./campaign/campaignService.ts";
@@ -215,6 +218,13 @@ const getCapacityOutputSchema = z.object({
 
 const PUBLIC_TOOLS = [
   {
+    name: "get_application_version",
+    description: "Reads the installed Atelier application version and an accessible verified update target. Source installations report the startup commit, never provider versions. Unavailable data includes stable reason codes.",
+    inputSchema: z.toJSONSchema(applicationVersionInputSchema, { io: "input" }),
+    outputSchema: z.toJSONSchema(applicationVersionSchema, { io: "output" }),
+    annotations: { readOnlyHint: true },
+  },
+  {
     name: "list_projects",
     description: "Lists the Atelier projects available for creating a card.",
     inputSchema: z.toJSONSchema(listProjectsInputSchema, { io: "input" }),
@@ -407,11 +417,16 @@ export async function serveStatelessMcp(server: Server, request: Request, parsed
 
 type QuestionAnswerer = Pick<AgentCoordinator, "submitUserComment">;
 
-function createMcpServer(operations: TicketOperations, coordinator: QuestionAnswerer, dryRun: boolean, campaigns: CampaignService | null): Server {
+function createMcpServer(operations: TicketOperations, coordinator: QuestionAnswerer, dryRun: boolean, campaigns: CampaignService | null, readApplicationVersion: () => Promise<ApplicationVersion>): Server {
   const tools = campaigns === null ? PUBLIC_TOOLS : [...PUBLIC_TOOLS, ...CAMPAIGN_TOOLS];
   return createToolServer(tools, async (request): Promise<McpTextResult> => {
     const input = request.params.arguments ?? {};
     try {
+      if (request.params.name === "get_application_version") {
+        const parsed = applicationVersionInputSchema.safeParse(input);
+        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
+        return toolResult(applicationVersionSchema, await readApplicationVersion());
+      }
       if (request.params.name === "list_projects") {
         const parsed = listProjectsInputSchema.safeParse(input);
         if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
@@ -525,6 +540,7 @@ export class PublicMcpManager {
     token: string,
     private readonly dryRun: boolean,
     private readonly campaigns: CampaignService | null = null,
+    private readonly readApplicationVersion: () => Promise<ApplicationVersion> = createApplicationVersionReader({ sourceRevision: null, cloud: false }),
   ) {
     this.token = token;
   }
@@ -549,6 +565,6 @@ export class PublicMcpManager {
       return jsonResponse(HTTP_BAD_REQUEST, "only MCP POST requests are accepted");
     }
 
-    return serveStatelessMcp(createMcpServer(this.operations, this.coordinator, this.dryRun, this.campaigns), request);
+    return serveStatelessMcp(createMcpServer(this.operations, this.coordinator, this.dryRun, this.campaigns, this.readApplicationVersion), request);
   }
 }

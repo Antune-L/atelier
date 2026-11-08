@@ -284,6 +284,7 @@ test("an official MCP client lists, creates idempotently, starts, and updates RE
     "answer_question",
     "create_review_ticket",
     "create_todo_ticket",
+    "get_application_version",
     "get_capacity",
     "get_ticket",
     "list_open_prs",

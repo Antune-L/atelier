@@ -220,6 +220,7 @@ async function boot(): Promise<void> {
   const desktopUpdates = dryRun || canSelfUpdate ? undefined : createDesktopUpdates({ ...roots, reserve: () => server.reserveUpdate(), stopAndExit: async () => { await server.stop(); process.exit(0); } });
   const server = await startServer({
     desktopUpdates,
+    desktopVersion: localBuild.version,
     deferRecovery: needsUpdateRecovery,
     beforeRecovery: !dryRun && (isPendingUpdate || canSelfUpdate) ? nativeHealth : undefined,
     resourcesRoot: roots.resourcesRoot,

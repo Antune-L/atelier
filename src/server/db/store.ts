@@ -79,6 +79,7 @@ import { createLogger } from "../logger.ts";
 
 import { safeJsonParse } from "../system/boundedCommand.ts";
 import { minimizeQualityAction, redactSecrets } from "../system/secretRedaction.ts";
+import { CampaignStore } from "./campaignStore.ts";
 import { mapAuditFindingRow, mapAuditProjectSettingsRow, mapAuditProjectStateRow, mapAuditRunRow, mapQualityActionRow, mapQualityRequestRow, mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapPreviewProjectSettingsRow, mapPreviewRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapMacOutboxRow, mapVpsOutboxReceiptRow, mapVpsPendingSendRow, mapWorktreeSessionRow } from "./rows.ts";
 import type { VpsOutboxReceipt } from "./rows.ts";
 import { EMPTY_REVIEW_PASS_DECISIONS, USER_DECISION_APPLIED_EVENT, archivedReviewResultSchema, reviewVerdictSchema, reviewVerificationStatusSchema, parseJsonColumn, reviewPassDecisionsSchema, reviewPublicationIntentSchema } from "./reviewDecisions.ts";
@@ -865,7 +866,11 @@ export class Store {
     });
   }
 
-  constructor(private readonly db: Database) {}
+  readonly campaigns: CampaignStore;
+
+  constructor(private readonly db: Database) {
+    this.campaigns = new CampaignStore(db, (fn) => this.transaction(fn));
+  }
 
   listPrNotifications(): PrNotification[] {
     const contexts = new Map(this.listProjectKeys().flatMap((key) => {

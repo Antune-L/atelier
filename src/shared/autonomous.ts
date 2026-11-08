@@ -45,6 +45,31 @@ export const autonomousPlanInputSchema = z.object({
 }).refine((input) => new Set(input.criteria.map((criterion) => criterion.id)).size === input.criteria.length, "Criterion ids must be unique");
 export type AutonomousPlanInput = z.infer<typeof autonomousPlanInputSchema>;
 
+export const autonomousSourceSnapshotSchema = z.object({
+  title: z.string(),
+  description: z.string(),
+  prd: z.string().nullable(),
+  references: z.array(z.object({ reference: z.string(), path: z.string().nullable(), digest: z.string().nullable(), error: z.string().nullable() })),
+  capturedAt: z.number().int().nonnegative(),
+});
+export type AutonomousSourceSnapshot = z.infer<typeof autonomousSourceSnapshotSchema>;
+
+export const autonomousSourceCoverageSchema = z.object({
+  runId: z.string().min(1),
+  revision: z.string().min(1),
+  sourceFingerprint: z.string().min(1),
+  configFingerprint: z.string().min(1),
+  snapshotFingerprint: z.string().min(1),
+  inventorySessionId: z.string().min(1).optional(),
+  inventoryArtifactPath: z.string().min(1).optional(),
+  provider: z.string().min(1),
+  sessionId: z.string().min(1),
+  accepted: z.boolean(),
+  correctable: z.boolean().optional(),
+  artifactPath: z.string().min(1),
+  completedAt: z.number().int().nonnegative(),
+});
+
 export const autonomousStartKindSchema = z.enum(["orchestrator", "implementation", "review", "repair", "retry", "setup", "check", "preview", "publication", "validator", "diagnostic", "quality_run", "assessment", "other"]);
 export type AutonomousStartKind = z.infer<typeof autonomousStartKindSchema>;
 const timestampSchema = z.number().int().nonnegative();
@@ -88,6 +113,8 @@ const persistedPhaseSchema = z.string().transform((phase) => phase.startsWith("b
 
 export const autonomousStateSchema = z.object({
   execution: autonomousExecutionSchema.optional(),
+  sourceSnapshot: autonomousSourceSnapshotSchema.optional(),
+  sourceCoverage: autonomousSourceCoverageSchema.nullable().optional(),
   hostMutation: z.object({
     kind: z.enum(["create_pr", "merge", "prepare_candidate", "push_candidate", "draft_pr", "update_pr_body"]),
     operationId: z.string().min(1).optional(),

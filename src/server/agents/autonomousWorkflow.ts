@@ -17,6 +17,7 @@ import { KeyedMutex } from "../mutex.ts";
 import type { PreviewManager } from "../previewManager.ts";
 import type { SystemAdapter } from "../system/types.ts";
 
+import { autonomousSourceDigest, captureAutonomousSources } from "./autonomousSourceCoverage.ts";
 import type { QualityManager } from "./qualityManager.ts";
 
 const MINUTE_MS = 60_000;
@@ -167,11 +168,12 @@ export class AutonomousWorkflow {
       const quality = this.deps.quality.get(ticketId);
       if (quality.runs.length > 0) throw new Error("Freeze the initial plan before running validation or implementing the feature.");
       const source = sourceFingerprint(ticket);
+      const sourceSnapshot = await captureAutonomousSources(ticket, ticket.slotId === null ? getProject(ticket.project).repoPath : join(SLOTS_ROOT, `slot-${ticket.slotId}`));
       const acceptance = this.deps.store.createQualityCriteriaSnapshot(ticketId, { criteria: plan.criteria, mode: "repository", sourceFingerprint: source, createdBy: "agent" });
       const functional = this.deps.store.createQualityCriteriaSnapshot(ticketId, { criteria: plan.criteria.map((criterion) => ({ ...criterion, covers: [criterion.id] })), mode: "browser", purpose: "functional", baseSnapshotId: acceptance.id, sourceFingerprint: source, createdBy: "agent" });
       const startedAt = ticket.autonomousState?.startedAt ?? Date.now();
       const state: AutonomousState = {
-        phase: "planning", plan, sourceFingerprint: source, configFingerprint: this.configFingerprint(ticket), planFingerprint: fingerprint(plan), deliveryConfirmation: null, hostMutation: null,
+        phase: "planning", plan, sourceSnapshot, sourceCoverage: null, sourceFingerprint: source, configFingerprint: this.configFingerprint(ticket), planFingerprint: fingerprint(plan), deliveryConfirmation: null, hostMutation: null,
         acceptanceSnapshotId: acceptance.id, functionalSnapshotId: functional.id, revision: null, fullRunId: null, previewRunId: null, previewId: null,
         ...(ticket.autonomousState?.execution ? { execution: ticket.autonomousState.execution } : {}),
         startedAt, deadlineAt: ticket.autonomousState?.deadlineAt ?? startedAt + (ticket.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES) * MINUTE_MS, corrections: ticket.autonomousState?.corrections ?? 0, environmentRetries: ticket.autonomousState?.environmentRetries ?? 0, error: null,
@@ -226,6 +228,8 @@ export class AutonomousWorkflow {
     if (!reconciling && !state.deliveryConfirmation && Date.now() >= this.workDeadline(state)) throw new Error(TIMEOUT_MESSAGE);
     const full = state.fullRunId ? this.deps.store.getQualityRun(state.fullRunId) : null;
     const functional = state.previewRunId ? this.deps.store.getQualityRun(state.previewRunId) : null;
+    const coverage = state.sourceCoverage;
+    if (!state.sourceSnapshot || !coverage?.accepted || !coverage.inventorySessionId || !coverage.inventoryArtifactPath || coverage.inventorySessionId === coverage.sessionId || coverage.runId !== state.fullRunId || coverage.revision !== revision || coverage.sourceFingerprint !== state.sourceFingerprint || coverage.configFingerprint !== full?.configFingerprint || coverage.snapshotFingerprint !== autonomousSourceDigest(state.sourceSnapshot) || coverage.provider !== ticket.orchestrator) throw new Error("Independent coverage of the original sources is missing or stale for this candidate.");
     if (!full || !functional || !this.accepted(ticket, full, false) || !this.accepted(ticket, functional, true)) throw new Error("Both independent local and preview proofs must accept every frozen case at the current revision.");
     if (!state.previewId) throw new Error("The autonomous preview binding is missing.");
     const preview = this.deps.preview.get(state.previewId);
@@ -429,7 +433,8 @@ export class AutonomousWorkflow {
     const evidence = this.deps.quality.get(ticketId).evidence.filter((entry) => entry.runId === run.id);
     const failedCriteria = evidence.filter((entry) => entry.authority === "agent" && entry.status === "failed" && entry.criterionId && entry.sessionId && entry.provider === run.provider && entry.output.trim().length > 0 && !entry.timedOut);
     const technicalFailure = run.technicalEvidenceAccepted && evidence.some((entry) => entry.status === "failed" && entry.authority === "server" && entry.kind === "command" && entry.exitCode !== null && entry.exitCode !== 0 && !entry.timedOut);
-    const acceptedFailure = state.execution ? run.evidenceAccepted || technicalFailure || failedCriteria.length > 0 : run.evidenceAccepted;
+    const sourceFailure = state.sourceCoverage?.runId === run.id && state.sourceCoverage.correctable === true && !state.sourceCoverage.accepted;
+    const acceptedFailure = state.execution ? sourceFailure || run.evidenceAccepted || technicalFailure || failedCriteria.length > 0 : run.evidenceAccepted;
     const failureCategories = state.execution ? ["code_nonconformance", "backend_checks_failed", "validation_incomplete"] : ["code_nonconformance", "backend_checks_failed"];
     const failedStatus = run.status === "failed" || state.execution !== undefined && run.status === "inconclusive" && (technicalFailure || failedCriteria.length > 0);
     const correctable = !run.simulated && failedStatus && run.cleanupStatus === "complete" && acceptedFailure && (!run.diagnostic || failureCategories.includes(run.diagnostic.category));
@@ -449,6 +454,7 @@ export class AutonomousWorkflow {
       }
       this.patch(ticketId, { phase: "correcting", corrections: state.corrections + 1, fullRunId: null, previewRunId: null, error: run.error ? this.deps.preview.redactError(run.error) : null });
       const observations = this.deps.quality.get(ticketId).evidence.filter((entry) => entry.runId === run.id && entry.status !== "passed").map((entry) => entry.criterionId ?? entry.summary);
+      if (sourceFailure && state.sourceCoverage) observations.push(`Original-source audit: ${state.sourceCoverage.artifactPath}`);
       await this.deps.inject(ticketId, this.deps.preview.redactError(`La validation indépendante ${run.id} a constaté un échec attribué. Distingue ses preuves des vérifications encore inconclusives, diagnostique la cause et corrige dans le même worktree, conserve le plan initial, relance la review indépendante, commit et push puis appelle validate_autonomous. N’ouvre pas de PR. Consulte les preuves du run pour le diagnostic. Cas concernés : ${observations.join("; ")}. Correction ${state.corrections + 1}/${maxCorrections}.`));
       return;
     }

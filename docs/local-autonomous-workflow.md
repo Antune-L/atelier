@@ -21,6 +21,20 @@ The default correction budget is one correction and the default execution deadli
 7. PR-only delivery verifies the PR and never requests a merge. Merge delivery verifies native policies and uses GitHub's synchronous merge endpoint with the expected source commit. A repository requiring a merge queue blocks this pilot instead of silently enqueueing work. Only a confirmed merge counts as merged.
 8. The backend persists the confirmed host outcome, cleans the owned preview, then completes the card and releases its slot. Cleanup failure retains the confirmation and worktree for reconciliation without repeating delivery.
 
+## Persistent implementation lots
+
+One autonomous feature ticket can submit its existing persistent implementation plan after freezing the business plan. Independent scopes retain parallel implementation; consumers wait for their prerequisites. No campaign or additional orchestration engine is required.
+
+Each autonomous lot receives a separate backend-triggered simplifier turn, including correction lots. The backend requires a completed, correlated inspection rather than a summary claiming simplification. It then serializes integration and configured technical controls for that ticket, captures the simplified source and assembled file identities, and persists command outcomes. A lot without accepted real controls cannot complete or unblock a consumer. The initial unit-test preparation can skip the behavioral test command because its new assertions may intentionally fail before implementation; the reason is retained, and available lint/type checks still apply.
+
+Autonomous plan lots explicitly declare `validation: "functional"` when a user journey applies. The backend runs the repository's existing `test:e2e` or `e2e` script; its environment must already be isolated and authorized for the project. A missing suite blocks the lot. A technical-only lot requires `validation: "technical"` and a concrete `validationReason`. The independent source auditor checks these applicability declarations. This runner does not provision a preview for every lot; the final preview validation remains separate and mandatory. Real email testing still needs authorization.
+
+Prerequisite evidence must match the current scoped files and project validation configuration before consumption. Interrupted or uncertain steps retain their work and block explicitly. Integration recovery reuses a successful integration journal and reruns checks, rather than applying the child changes twice. External changes that invalidate simplification need correction or explicit recovery; a restart does not invent replacement proof.
+
+For autonomous persistent plans, final review requires independent approval of the current code even after the ordinary review budget is exhausted. Correct accepted objections through delegated lots and rerun relevant checks and reviews; preserve the reasoning for rejected objections in the next review context. Exhaustion retains the work instead of making incomplete review acceptable. Final whole-candidate checks supersede earlier assembly fingerprints after legitimate descendant changes, while every lot must retain its accepted quality step.
+
+Original spec and mockup coverage is independently audited as described in [Autonomous original-source coverage](autonomous-source-coverage.md). Missing original sources, unapproved scope changes and unavailable validation prerequisites prevent a complete delivery claim.
+
 ## Campaign final card
 
 An [autonomous campaign](campaigns.md) creates one autonomous card at finalization. It is linked to the campaign instead of using a dependency or split order, so the pilot accepts it. It adopts the existing campaign branch rather than creating its own, while its pull request targets the base branch: work base and pull request target are separate only for this card. Its delivery is always **Create the PR without merging**; a merge delivery is refused. Its preview is kept after delivery until the campaign's review time. Ordinary campaign cards are not autonomous: they run the ordinary pipeline and the campaign merges them into its branch.

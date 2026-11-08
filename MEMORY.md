@@ -46,6 +46,8 @@ Azure DevOps can return `isRequired: null` for a reviewer. Keep reviewer schemas
 
 ## Delegated implementation recovery
 
+Autonomous lot quality applies to the integrated candidate, not only the child turn. Keep simplification provenance separate from backend command outcomes, serialize integration with those commands, and reject simulated or stale prerequisite proofs before launching a consumer. Final whole-candidate validation can supersede earlier assembly fingerprints after legitimate descendant changes, but cannot substitute for a missing per-lot quality step. Preserve initial source snapshots independently of agent-extracted acceptance criteria; attaching an exact mockup to an auditor proves its input identity, not the correctness of its interpretation.
+
 Manual takeover does not protect child changes from ordinary final slot-release cleanup. Before finalization, preserve and verify every unreconciled child workspace and journal outside the cleanup scope; if preservation fails, retain the slot and block cleanup. Recovery also needs affirmative evidence for every frozen obligation independently of the ordinary review-pass budget: an exhausted review budget cannot turn missing coverage into success.
 
 A child can finish integration before its parent records completion. Keep the successful integration journal after removing the child worktree so recovery can recognize that outcome without applying its changes twice, and bind journals to the execution cycle so a fresh run cannot reuse an old completion. Suspending a child must release its active workspace ownership while preserving the workspace and journal; otherwise cleanup can wait for a session that no longer exists or erase the changes needed for recovery.

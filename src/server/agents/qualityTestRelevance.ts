@@ -26,7 +26,7 @@ export const testRelevanceResponseSchema = z.object({
   })).min(1),
 });
 
-function attributed(citation: z.infer<typeof citationSchema>, observations: QualityObservation[], cwd: string): string | null {
+export function attributedQualityCitation(citation: z.infer<typeof citationSchema>, observations: QualityObservation[], cwd: string): string | null {
   const local = relative(cwd, isAbsolute(citation.path) ? citation.path : join(cwd, citation.path));
   if (local === ".." || local.startsWith("../") || isAbsolute(local)) return null;
   return observations.find((observation) => observation.ok
@@ -68,9 +68,9 @@ export function assessTestRelevance(output: unknown, observations: QualityObserv
   }
   const labels = { relevant: "couverture pertinente", cosmetic: "assertions cosmétiques", missing: "couverture manquante", uncertain: "couverture incertaine" };
   for (const rule of parsed.data.rules) {
-    const featureRead = attributed(rule.feature, observations, cwd);
+    const featureRead = attributedQualityCitation(rule.feature, observations, cwd);
     const accepted = featureRead !== null
-      && rule.tests.length > 0 && rule.tests.every((citation) => attributed(citation, observations, cwd) !== null);
+      && rule.tests.length > 0 && rule.tests.every((citation) => attributedQualityCitation(citation, observations, cwd) !== null);
     if (!accepted || rule.assessment === "uncertain") complete = false;
     const bullet = {
       summary: qualityErrorMessage(`${rule.rule} · ${accepted ? labels[rule.assessment] : "preuves insuffisantes"}`),
@@ -104,7 +104,7 @@ export async function runTestRelevance(options: Omit<QualitySessionOptions, "mod
     bullet.details = session.redact(bullet.details);
   }
   for (const rule of testRelevanceResponseSchema.safeParse(output).data?.rules ?? []) {
-    const actionIds = session.observations.filter((observation) => observation.ok && [rule.feature, ...rule.tests].some((citation) => attributed(citation, [observation], options.cwd) !== null)).flatMap((observation) => observation.actionId ? [observation.actionId] : []);
+    const actionIds = session.observations.filter((observation) => observation.ok && [rule.feature, ...rule.tests].some((citation) => attributedQualityCitation(citation, [observation], options.cwd) !== null)).flatMap((observation) => observation.actionId ? [observation.actionId] : []);
     for (const criterionId of rule.covers) options.journal?.observe({ kind: "observation", phase: "test-relevance", status: actionIds.length > 0 ? "succeeded" : "unknown", sessionId: session.sessionId, provider: options.execution.provider, criterionId, actionIds, artifactPaths: [artifactPath], summary: "Test relevance assessment linked to exact completed repository reads" });
   }
   options.journal?.assertHealthy();

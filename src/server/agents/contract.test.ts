@@ -351,12 +351,11 @@ describe("lightening pass", () => {
     expect(LIGHTENING_PASS_HINT).not.toMatch(/simplifier/i);
   });
 
-  test("is part of the ticket contract for every implementer and before formatting", () => {
+  test("is part of the ordinary ticket contract for every implementer and before formatting", () => {
     const tickets = [
       makeTicket({ orchestrator: "claude", implementer: "claude" }),
       makeTicket({ orchestrator: "codex", implementer: "codex" }),
       makeTicket({ id: "tc-composer", orchestrator: "claude", implementer: "composer" }),
-      makeTicket({ orchestrator: "codex", implementer: "codex", autonomous: true }),
     ];
     for (const ticket of tickets) {
       const contract = buildTicketContract(ticket, TICKET_OPTS);
@@ -365,9 +364,12 @@ describe("lightening pass", () => {
     }
   });
 
-  test("autonomous tickets delegate the pass as one last lot", () => {
-    const contract = buildTicketContract(makeTicket({ orchestrator: "codex", implementer: "codex", autonomous: true }), TICKET_OPTS);
-    expect(contract).toContain('delegate_implementation({label:"allègement"');
+  test("autonomous tickets require backend simplification after every lot including corrections", () => {
+    for (const provider of ["claude", "codex"] satisfies Orchestrator[]) {
+      const contract = buildTicketContract(makeTicket({ orchestrator: provider, implementer: provider, autonomous: true }), TICKET_OPTS);
+      expect(contract).toContain("une simplification après chaque lot, corrections comprises");
+      expect(contract).not.toContain('delegate_implementation({label:"allègement"');
+    }
   });
 
   test("is absent from quality-correction iterations, which already had their pass", () => {

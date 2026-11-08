@@ -23,6 +23,7 @@ import type { SystemAdapter, ValidationCommandResult, ValidationRevision, Valida
 import { validationDatabasePath } from "../system/validationWorkspace.ts";
 
 import { createAutonomousSessionGuard } from "./autonomousSessionGuard.ts";
+import { auditAutonomousSources, autonomousMockupAttachments, autonomousSourceDigest } from "./autonomousSourceCoverage.ts";
 import { resolveExecution } from "./executionConfig.ts";
 import { executeCombinedQuality, pendingVerification } from "./combinedQuality.ts";
 import { QualityJournal } from "./qualityJournal.ts";
@@ -1114,6 +1115,22 @@ export class QualityManager {
         activeCriteria = this.dependencies.store.createQualityCriteriaSnapshot(ticket.id, { criteria: scenarios, mode: "browser", sourceFingerprint: sourceFingerprint(currentTicket), createdBy: this.dependencies.system.dryRun ? "system" : "agent", purpose: "functional", baseSnapshotId: acceptance?.id ?? null, uncovered: plan.uncovered, ...(preview ? { previewId: preview.previewId } : {}) });
         this.update(run.id, { criteriaSnapshotId: activeCriteria.id, mode: activeCriteria.mode });
       }
+      if (ticket.autonomous && !manual && run.kind === "full") {
+        const frozen = this.ticket(ticket.id).autonomousState;
+        if (!frozen?.sourceSnapshot || !frozen.sourceFingerprint) throw new Error("The original autonomous sources were not captured before implementation.");
+        if (this.dependencies.system.dryRun) throw new Error("Original-source coverage requires a real independent provider session.");
+        phase = "validating";
+        this.update(run.id, { phase });
+        const snapshotFingerprint = autonomousSourceDigest(frozen.sourceSnapshot);
+        const audit = await auditAutonomousSources({ artifactDirectory, journal, ticketId: ticket.id, runId: run.id, cwd: environment.directory, execution, environment: variables, signal, timeoutMs, sources: frozen.sourceSnapshot, criteria: activeCriteria?.criteria ?? [], implementationPlan: this.dependencies.store.getImplementationPlan(ticket.id), onClosureUnknown, startSession: (sessionOptions) => this.startSession(ticket.id, sessionOptions) });
+        if (nativeClosureUnknown || await this.hasNativeCleanupObligation(run.id)) throw new Error("Source auditor closure is unconfirmed.");
+        if (originalFingerprint !== await this.dependencies.system.codeFingerprint(environment.directory)) throw new Error("Source auditor modified the validated candidate.");
+        const current = this.ticket(ticket.id);
+        const state = current.autonomousState;
+        if (!state || sourceFingerprint(current) !== sourceFingerprint(ticket) || autonomousSourceDigest(state.sourceSnapshot) !== snapshotFingerprint || configFingerprint(getProject(current.project)) !== run.configFingerprint || signal.aborted) throw new Error("Original sources or validation configuration changed during source coverage audit.");
+        this.dependencies.store.updateTicket(ticket.id, { autonomousState: { ...state, sourceCoverage: { ...audit, runId: run.id, revision: run.revision, sourceFingerprint: frozen.sourceFingerprint, configFingerprint: run.configFingerprint, snapshotFingerprint, provider: execution.provider, completedAt: Date.now() } } });
+        if (!audit.accepted) throw new Error("Independent original-source coverage is incomplete. Inspect the retained source-coverage artifact before correcting within the frozen scope.");
+      }
       phase = "preparing";
       this.update(run.id, { phase });
       if (!preview && !this.dependencies.system.dryRun && activeCriteria?.mode === "browser" && run.kind !== "checks" && (!project.validation?.isolated || !project.validation.startCommand)) throw new QualityBlockerError("start_configuration_missing", BROWSER_CONFIGURATION_MESSAGE);
@@ -1199,7 +1216,8 @@ export class QualityManager {
           revision: sourceRun.revision, error: sourceRun.error, diagnostic: sourceRun.diagnostic,
           observations: quality.evidence.filter((entry) => entry.runId === sourceRun.id).map(({ criterionId, status, summary, output, timedOut }) => ({ criterionId, status, summary, output: output.slice(-PREVIOUS_OBSERVATION_LIMIT), timedOut })),
         } : undefined;
-        const result = await runQualityValidator({ journal, deadlineAt: manual?.deadlineAt, executionGuard: executionGuard ?? undefined, onClosureUnknown, previousValidation, ticketId: ticket.id, runId: run.id, cwd: environment.directory, execution, criteria: activeCriteria.criteria, mode: functional ? "browser" : activeCriteria.mode, functional, revisionSha: run.revision, environment: variables, checks, addresses: environment.addresses ?? [], signal, timeoutMs, artifactDirectory, ...(preview?.auth ? { browserAuth: preview.auth } : {}), ...(preview?.testData ? { testData: preview.testData } : {}), startSession: (sessionOptions) => this.startSession(ticket.id, sessionOptions, manual) });
+        const originalMockups = functional && ticket.autonomous && !manual && ticket.autonomousState?.sourceSnapshot ? await autonomousMockupAttachments(ticket.autonomousState.sourceSnapshot, environment.directory) : [];
+        const result = await runQualityValidator({ originalMockups, journal, deadlineAt: manual?.deadlineAt, executionGuard: executionGuard ?? undefined, onClosureUnknown, previousValidation, ticketId: ticket.id, runId: run.id, cwd: environment.directory, execution, criteria: activeCriteria.criteria, mode: functional ? "browser" : activeCriteria.mode, functional, revisionSha: run.revision, environment: variables, checks, addresses: environment.addresses ?? [], signal, timeoutMs, artifactDirectory, ...(preview?.auth ? { browserAuth: preview.auth } : {}), ...(preview?.testData ? { testData: preview.testData } : {}), startSession: (sessionOptions) => this.startSession(ticket.id, sessionOptions, manual) });
         if (nativeClosureUnknown || await this.bounded(manual, this.hasNativeCleanupObligation(run.id))) throw new Error("Native validator session closure is unconfirmed.");
         if (!result.sessionId) throw new Error("Validator returned no independently attributable session identity.");
         if (signal.aborted) throw new Error("Quality run cancelled.");
@@ -1214,13 +1232,14 @@ export class QualityManager {
         for (const evidence of result.evidence) {
           this.dependencies.store.appendQualityEvidence({ runId: run.id, criterionId: evidence.criterionId, kind: "behavior", authority: "agent", author: "agent", status: evidence.status, summary: evidence.summary, output: evidence.output, command: null, exitCode: null, timedOut: evidence.timedOut, durationMs: evidence.durationMs, artifactPath: evidence.artifactPath, provider: run.provider, sessionId: result.sessionId, model: execution.model, ...(evidence.scenario ? { scenario: evidence.scenario } : {}) });
         }
-        const behavioralPassed = knownCriteria.filter((criterion) => criterion.required).every((criterion) => result.evidence.some((evidence) => evidence.criterionId === criterion.id && evidence.status === "passed"));
-        const behavioralFailed = knownCriteria.some((criterion) => criterion.required && result.evidence.some((evidence) => evidence.criterionId === criterion.id && evidence.status === "failed"));
+        const behavioralPassed = result.mockupFidelityAccepted !== false && knownCriteria.filter((criterion) => criterion.required).every((criterion) => result.evidence.some((evidence) => evidence.criterionId === criterion.id && evidence.status === "passed"));
+        const behavioralFailed = result.mockupFidelityFailed === true || knownCriteria.some((criterion) => criterion.required && result.evidence.some((evidence) => evidence.criterionId === criterion.id && evidence.status === "failed"));
         let status: "passed" | "failed" | "inconclusive" = "inconclusive";
         if (technicalPassed && behavioralPassed) status = "passed";
         else if (!technicalPassed || behavioralFailed) status = "failed";
         let error: string | null = null;
         if (!technicalPassed) error = "One or more technical checks failed.";
+        else if (result.mockupFidelityAccepted === false) error = "The original mockups were not accepted by a screenshot-attributed final comparison.";
         else if (!behavioralPassed) error = functional ? "Some required functional scenarios were not verified in the browser." : "Some required acceptance criteria were not independently verified.";
         let failurePhase: QualityRunPhase | null = null;
         if (!technicalPassed) failurePhase = "checks";

@@ -8,7 +8,7 @@ import { z } from "zod";
 
 import { QUALITY_DEFAULT_TIMEOUT_MS } from "../../shared/quality.ts";
 import type { QualityPermissionBlockReason, QualityValidationMode } from "../../shared/quality.ts";
-import type { AgentExecutionGuard, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
+import type { AgentImageInput, AgentExecutionGuard, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
 import { CODEX_VALIDATOR_READ_ALLOW } from "../system/codexCommandPolicy.ts";
 import { redactSecrets } from "../system/secretRedaction.ts";
 
@@ -85,6 +85,7 @@ export interface QualitySessionOptions {
   phase?: string;
   mode: QualityValidationMode;
   prompt: string;
+  images?: readonly AgentImageInput[];
   outputSchema: Record<string, unknown>;
   allowedTools?: string[];
   disallowedTools?: string[];
@@ -291,7 +292,7 @@ export async function runQualitySession(options: QualitySessionOptions) {
     });
     if (options.signal.aborted) onAbort();
     if (settled) dispose();
-    else handle.send(options.prompt);
+    else handle.send(options.prompt, undefined, options.images);
     completed = await completion;
   } finally {
     clearTimeout(timer);

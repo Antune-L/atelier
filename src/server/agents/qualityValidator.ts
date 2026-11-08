@@ -17,6 +17,7 @@ import { envWithProjectNode } from "../system/nvmNode.ts";
 import { redactSecrets } from "../system/secretRedaction.ts";
 import { previewHostResolverArgs } from "../system/previewNetwork.ts";
 
+import type { OriginalMockupAttachment } from "./autonomousSourceCoverage.ts";
 import type { ResolvedExecution } from "./executionConfig.ts";
 import { PLAYWRIGHT_MCP_VERSION, playwrightMcpArgs } from "./playwrightMcp.ts";
 import { QualityBlockerError } from "./qualityBlocker.ts";
@@ -74,7 +75,9 @@ const qualityResultSchema = z.object({
   screenshot: z.string().nullable().default(null),
 });
 const qualityResponseSchema = z.object({ results: z.array(qualityResultSchema) });
+const mockupFidelitySchema = z.object({ reference: z.string().min(1), digest: z.string().min(1), status: z.enum(["passed", "failed", "inconclusive"]), summary: z.string().trim().min(1), observedText: z.string().trim().min(1), screenshot: z.string().nullable() });
 const qualityFunctionalResponseSchema = z.object({
+  mockupFidelity: z.array(mockupFidelitySchema).optional(),
   results: z.array(qualityResultSchema.extend({
     actions: z.array(z.string()),
     blocker: z.enum(QUALITY_SCENARIO_BLOCKERS).nullable(),
@@ -119,6 +122,7 @@ export interface QualityValidatorOptions {
   testData?: string;
   mode?: QualityValidationMode;
   functional?: boolean;
+  originalMockups?: OriginalMockupAttachment[];
   previousValidation?: { revision: string; error: string | null; diagnostic: QualityRunDiagnostic | null; observations: Array<Pick<QualityEvidence, "criterionId" | "status" | "summary" | "output" | "timedOut">> };
 }
 
@@ -128,6 +132,8 @@ export interface QualityValidatorResult {
   model: string;
   provider: Orchestrator;
   diagnostic?: QualityRunDiagnostic | null;
+  mockupFidelityAccepted?: boolean;
+  mockupFidelityFailed?: boolean;
 }
 
 function browserToolName(name: string): string | null {
@@ -420,7 +426,12 @@ export async function runQualityValidator(options: QualityValidatorOptions): Pro
         artifactDirectory,
         onClosureUnknown: markBrowserClosureUnknown,
         mode,
-        prompt: functional ? functionalPrompt(options) : qualityPrompt({ ...options, mode }),
+        images: options.originalMockups,
+        prompt: [functional ? functionalPrompt(options) : qualityPrompt({ ...options, mode }), ...(options.originalMockups?.length ? [
+          "Original mockups are attached in the listed order. Compare the actual rendered result against EACH original image independently of the extracted criteria. Inspect a current viewport or element screenshot for each comparison, including layout, styling, content and interaction affordances. A DOM snapshot alone cannot certify visual fidelity. Do not accept an unapproved deviation.",
+          "Return mockupFidelity with exactly one entry per original image: copy reference and digest, status passed/failed/inconclusive, a concrete comparison summary, observedText and the screenshot name returned by this run's browser_take_screenshot. Missing or unreadable original images or absent screenshots are inconclusive, never passed. Keep ordinary criterion results unchanged.",
+          JSON.stringify(options.originalMockups.map(({ reference, digest }) => ({ reference, digest }))),
+        ] : [])].join("\n"),
         outputSchema: z.toJSONSchema(functional ? qualityFunctionalResponseSchema : qualityResponseSchema, { target: "draft-07" }),
         allowedTools: browserServer ? QUALITY_BROWSER_TOOLS.map((tool) => `mcp__playwright__${tool}`) : [],
         disallowedTools: QUALITY_DISABLED_BROWSER_TOOLS.map((tool) => `mcp__playwright__${tool}`),
@@ -463,6 +474,18 @@ export async function runQualityValidator(options: QualityValidatorOptions): Pro
         screenshot.path = retainedPath;
       }
     }
+    const originalMockups = options.originalMockups ?? [];
+    const mockupResults = qualityFunctionalResponseSchema.safeParse(structuredOutput).data?.mockupFidelity ?? [];
+    const eligibleMockupResults = mockupResults.filter((entry) => originalMockups.some((image) => image.reference === entry.reference && image.digest === entry.digest) && citedScreenshot(entry.screenshot, screenshots) !== null);
+    const mockupSessionAccepted = completed.type === "turn_end" && completed.ok && !timedOut && !cancelled && !cleanupFailed;
+    const mockupFidelityAccepted = mockupSessionAccepted && mockupResults.length === originalMockups.length && originalMockups.every((image) => eligibleMockupResults.filter((entry) => entry.reference === image.reference && entry.digest === image.digest && entry.status === "passed").length === 1);
+    const mockupFidelityFailed = mockupSessionAccepted && eligibleMockupResults.some((entry) => entry.status === "failed");
+    const retainedMockupResults = mockupResults.map((entry) => ({ ...entry, summary: mask(entry.summary), observedText: mask(entry.observedText), screenshot: citedScreenshot(entry.screenshot, screenshots)?.name ?? null }));
+    for (const image of originalMockups) {
+      const entry = eligibleMockupResults.find((result) => result.reference === image.reference && result.digest === image.digest);
+      const screenshot = entry ? citedScreenshot(entry.screenshot, screenshots) : null;
+      options.journal?.observe({ kind: "observation", phase: "functional", status: entry?.status === "passed" && mockupFidelityAccepted ? "succeeded" : "failed", provider: options.execution.provider, sessionId, artifactPaths: screenshot ? [artifactPath, screenshot.path] : [artifactPath], summary: "Original mockup compared with an attributed candidate screenshot" });
+    }
     const artifactResults = results?.map((result) => ({
       criterionId: options.criteria.some((criterion) => criterion.id === result.criterionId) ? result.criterionId : "[unrecognized criterion]",
       status: result.status,
@@ -487,7 +510,7 @@ export async function runQualityValidator(options: QualityValidatorOptions): Pro
       if (diagnostic.path) diagnostic.path = mask(diagnostic.path);
       if (diagnostic.glob) diagnostic.glob = mask(diagnostic.glob);
     }
-    await writeFile(artifactPath, JSON.stringify({ mode, functional, runId: options.runId, revision: options.revisionSha, provider: options.execution.provider, sessionId, observations: artifactObservations, serverCheckObservations: artifactChecks, diagnostics: session.diagnostics, response: artifactResults ? { results: artifactResults } : null }, null, 2));
+    await writeFile(artifactPath, JSON.stringify({ mode, functional, runId: options.runId, revision: options.revisionSha, provider: options.execution.provider, sessionId, observations: artifactObservations, serverCheckObservations: artifactChecks, diagnostics: session.diagnostics, originalMockups: originalMockups.map(({ reference, digest }) => ({ reference, digest })), response: artifactResults ? { results: artifactResults, mockupFidelity: retainedMockupResults } : null }, null, 2));
     const acceptances = functional && results ? functionalAcceptances(results, options.criteria, indexedObservations, navigatedIndex, screenshots) : new Map<string, QualityFunctionalAcceptance>();
     const evidence = options.criteria.map((criterion) => {
       const matchingResults = results ? results.filter((result) => result.criterionId === criterion.id) : [];
@@ -562,13 +585,15 @@ export async function runQualityValidator(options: QualityValidatorOptions): Pro
       options.journal?.observe({ kind: "observation", phase: functional ? "functional" : "validating", status, provider: options.execution.provider, sessionId, criterionId: entry.criterionId, actionIds: exact.flatMap((observation) => observation.actionId ? [observation.actionId] : []), artifactPaths: entry.artifactPath ? [entry.artifactPath] : [], summary: "Criterion assessment linked to exact observed actions and retained artifact" });
     }
     let diagnostic: QualityRunDiagnostic | null = null;
-    if (evidence.some((entry) => entry.status === "failed" && options.criteria.some((criterion) => criterion.id === entry.criterionId && criterion.required))) diagnostic = { category: "code_nonconformance", summary: functional ? "Required browser scenarios were contradicted by attributed observations." : "Required acceptance criteria were contradicted by attributed observations.", permissionDenials: session.diagnostics.permissionDenials, blockers };
+    if (originalMockups.length > 0 && mockupFidelityFailed) diagnostic = { category: "code_nonconformance", summary: "Original mockup comparison found a deviation in an attributed candidate screenshot.", permissionDenials: session.diagnostics.permissionDenials, blockers };
+    else if (originalMockups.length > 0 && !mockupFidelityAccepted) diagnostic = { category: "validation_incomplete", summary: "Original mockup comparison lacks complete screenshot-attributed coverage.", permissionDenials: session.diagnostics.permissionDenials, blockers };
+    else if (evidence.some((entry) => entry.status === "failed" && options.criteria.some((criterion) => criterion.id === entry.criterionId && criterion.required))) diagnostic = { category: "code_nonconformance", summary: functional ? "Required browser scenarios were contradicted by attributed observations." : "Required acceptance criteria were contradicted by attributed observations.", permissionDenials: session.diagnostics.permissionDenials, blockers };
     else if (blockers.length > 0) diagnostic = { category: "environment_blocker", summary: "Some browser scenarios could not be exercised in the validation environment.", permissionDenials: session.diagnostics.permissionDenials, blockers };
     else if (timedOut) diagnostic = { category: "timeout", summary: "Independent validation exceeded its deadline.", permissionDenials: session.diagnostics.permissionDenials, blockers };
     else if (session.diagnostics.permissionDenialCount > 0) diagnostic = { category: "permission_denial", summary: "The provider reported specific tool permission refusals; source-code nonconformance is unconfirmed.", permissionDenials: session.diagnostics.permissionDenials, blockers };
     else if (evidence.some((entry) => entry.status === "inconclusive")) diagnostic = { category: "validation_incomplete", summary: "Independent validation did not produce complete attributed observations.", permissionDenials: [], blockers };
     options.journal?.assertHealthy();
-    return { evidence, sessionId, model: options.execution.model, provider: options.execution.provider, diagnostic };
+    return { evidence, sessionId, model: options.execution.model, provider: options.execution.provider, diagnostic, ...(originalMockups.length > 0 ? { mockupFidelityAccepted, mockupFidelityFailed } : {}) };
   } finally {
     if (!browserClosureUnknown) {
       if (browserOutputDirectory) await rm(browserOutputDirectory, { recursive: true, force: true });

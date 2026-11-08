@@ -36,7 +36,7 @@ In the macOS app, a persistent random token is created at first launch in `~/Lib
 KANBAN_MCP_TOKEN=replace-with-a-long-secret bun run dev
 ```
 
-Then configure the MCP client with the URL above and the token as a Bearer header. The available tools are `list_projects`, `list_tickets`, `get_ticket`, `create_todo_ticket`, `update_ticket`, `analyze_tickets`, `start_ticket`, `answer_question`, `list_open_prs` and `create_review_ticket`. Responses also report `dryRun` so that an agent can tell the sandbox apart from the real server.
+Then configure the MCP client with the URL above and the token as a Bearer header. The available tools are `list_projects`, `list_tickets`, `get_capacity`, `get_ticket`, `create_todo_ticket`, `update_ticket`, `analyze_tickets`, `start_ticket`, `answer_question`, `list_open_prs` and `create_review_ticket`. Responses also report `dryRun` so that an agent can tell the sandbox apart from the real server.
 
 The desktop app settings show the MCP URL and let you copy the token without exposing it to the web page. The regenerate button immediately replaces the token managed by Atelier; it is disabled when a token is supplied through `KANBAN_MCP_TOKEN`.
 

@@ -201,6 +201,16 @@ const listOpenPrsInputSchema = z.object({
 }).strict();
 const listOpenPrsOutputSchema = z.object({ prs: z.array(openPrSchema), dryRun: z.boolean() });
 
+const getCapacityInputSchema = z.object({}).strict();
+const getCapacityOutputSchema = z.object({
+  slots: z.object({
+    total: z.number().int().nonnegative().describe("Number of implementation slots on this host."),
+    free: z.number().int().nonnegative().describe("Slots that can take a card now."),
+    occupied: z.number().int().nonnegative().describe("Slots holding a card, whether running, stalled, interrupted or failed."),
+  }),
+  dryRun: z.boolean(),
+});
+
 const PUBLIC_TOOLS = [
   {
     name: "list_projects",
@@ -257,6 +267,13 @@ const PUBLIC_TOOLS = [
     inputSchema: z.toJSONSchema(startTicketInputSchema, { io: "input" }),
     outputSchema: z.toJSONSchema(startTicketOutputSchema, { io: "output" }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "get_capacity",
+    description: "Returns how many implementation slots this host has and how many are free right now.",
+    inputSchema: z.toJSONSchema(getCapacityInputSchema, { io: "input" }),
+    outputSchema: z.toJSONSchema(getCapacityOutputSchema, { io: "output" }),
+    annotations: { readOnlyHint: true },
   },
   {
     name: "get_ticket",
@@ -396,6 +413,11 @@ function createMcpServer(operations: TicketOperations, coordinator: QuestionAnsw
         const parsed = listProjectsInputSchema.safeParse(input);
         if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
         return toolResult(listProjectsOutputSchema, { projects: listPublicProjects(operations), dryRun });
+      }
+      if (request.params.name === "get_capacity") {
+        const parsed = getCapacityInputSchema.safeParse(input);
+        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
+        return toolResult(getCapacityOutputSchema, { slots: operations.slotCapacity(), dryRun });
       }
       if (request.params.name === "list_tickets") {
         const parsed = listTicketsInputSchema.safeParse(input);

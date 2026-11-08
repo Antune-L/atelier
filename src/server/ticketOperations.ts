@@ -386,6 +386,12 @@ export function ticketDependencyError(
 export class TicketOperations {
   constructor(private readonly deps: TicketOperationsDeps) {}
 
+  slotCapacity(): { total: number; free: number; occupied: number } {
+    const slots = this.deps.store.listSlots();
+    const free = slots.filter((slot) => slot.status === "free").length;
+    return { total: slots.length, free, occupied: slots.length - free };
+  }
+
   listProjects(): ProjectInfo[] {
     return listProjectKeys().map((key) => {
       const project = getProject(key);

@@ -347,7 +347,7 @@ export type CampaignQuotaPause = z.infer<typeof campaignQuotaPauseSchema>;
 
 export const campaignFinalizationSchema = z.object({
   startedAt: timestampSchema,
-  reason: z.enum(["all_merged", "deadline", "budget"]),
+  reason: z.enum(["all_merged", "deadline", "budget", "no_progress"]),
   frozenRevision: z.string().nullable(),
   targetBranch: z.string().min(1),
   prUrl: z.string().nullable(),
@@ -366,6 +366,16 @@ export const campaignFinalizationSchema = z.object({
   reserveUsedTokens: z.number().int().nonnegative(),
 });
 export type CampaignFinalization = z.infer<typeof campaignFinalizationSchema>;
+
+export type CampaignCriterionResult = CampaignFinalization["criteria"][number];
+
+export function missingCriterionResult(id: string): CampaignCriterionResult {
+  return { id, status: "missing", evidence: null, revision: null };
+}
+
+export function missingGlobalCriteria(plan: Pick<CampaignPlan, "globalCriteria">): CampaignCriterionResult[] {
+  return plan.globalCriteria.flatMap((criterion) => (criterion.id === undefined ? [] : [missingCriterionResult(criterion.id)]));
+}
 
 export const campaignExtensionSchema = z.object({
   deadlineAt: isoDateSchema,

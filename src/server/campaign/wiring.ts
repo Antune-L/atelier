@@ -6,6 +6,7 @@ import { getProject, isProjectKey } from "../config.ts";
 import type { SessionHub } from "../agents/sessionHub.ts";
 import type { SlotManager } from "../agents/slotManager.ts";
 import type { Store } from "../db/store.ts";
+import type { PreviewManager } from "../previewManager.ts";
 import type { TicketLifecycle } from "../lifecycle.ts";
 import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/types.ts";
@@ -81,6 +82,7 @@ export interface CampaignEngineWiringDeps {
   service: CampaignService;
   sessionHub: Pick<SessionHub, "setQuotaRefusalListener">;
   quota(provider: QuotaProvider): Promise<ProviderQuota | null>;
+  previews: Pick<PreviewManager, "stop">;
   dryRun: boolean;
   dataRoot: string;
 }
@@ -115,6 +117,7 @@ export function buildCampaignEngine(deps: CampaignEngineWiringDeps): CampaignEng
     skillRoots: campaignSkillRoots(deps.dryRun, deps.dataRoot),
     readyToStart: (campaign) => deps.service.readyToStart(campaign),
     quota: deps.quota,
+    preview: { get: (id) => deps.store.getPreview(id), stop: async (id) => { await deps.previews.stop(id); } },
   });
   deps.sessionHub.setQuotaRefusalListener((ticketId, refusal) => engine.recordQuotaRefusal(ticketId, refusal));
   deps.slots.setCampaignHooks({

@@ -141,7 +141,7 @@ const SETUP_PHASES = {
 export interface CampaignSlotHooks {
   /** Throws when a campaign card may not start now (prerequisites not merged, campaign paused…). */
   assertMayStart(ticket: Ticket): void;
-  /** The campaign merges this card itself; the ordinary auto-merge path stays out of it. */
+  /** The campaign merges this card itself (or, for its final card, never merges); the ordinary auto-merge paths stay out of it. */
   ownsMerge(ticketId: string): boolean;
   onDelivered(ticketId: string, delivery: { prUrl: string; mergeEligible: boolean }): void;
 }
@@ -1866,6 +1866,7 @@ export class SlotManager {
       const identity = await this.verifyAutonomousPr(currentTicket, path, prUrl);
       if (!identity.ok) return { ok: false, reason: identity.reason, slotReleased: false };
       if (currentTicket.autonomousDelivery === "merge") {
+        if (this.campaignHooks?.ownsMerge(ticketId)) return { ok: false, reason: "A campaign's final pull request is never merged automatically; it is delivered as a pull request only.", slotReleased: false };
         if (!isProjectKey(currentTicket.project) || !currentTicket.autonomousState?.revision) return { ok: false, reason: "Autonomous merge revision is unavailable.", slotReleased: false };
         const project = getProject(currentTicket.project);
         const merged = await this.system.readPr(path, prUrl, project.vcsProvider);

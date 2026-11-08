@@ -9,6 +9,7 @@ import type { Ticket } from "../shared/schemas.ts";
 import { COOLIFY_PREPARATION_MARKER } from "../shared/skills.ts";
 
 import type { QualityManager } from "./agents/qualityManager.ts";
+import { campaignPreviewRetainedUntil } from "./campaign/previewRetention.ts";
 import { getProject, isProjectKey } from "./config.ts";
 import type { Store } from "./db/store.ts";
 import { KeyedMutex } from "./mutex.ts";
@@ -618,6 +619,15 @@ export class PreviewManager {
     return slot?.ticketId === ticketId;
   }
 
+  /** The delivered preview of a campaign's final card stays up until the approved review time (FR7). */
+  private retainedAfterDelivery(preview: PreviewRecord): boolean {
+    if (preview.ticketId === null) return false;
+    const state = this.deps.store.getTicket(preview.ticketId)?.autonomousState;
+    if (!state?.deliveryConfirmation || state.deliveryConfirmation.revision !== preview.revision) return false;
+    const until = campaignPreviewRetainedUntil(this.deps.store, preview.ticketId);
+    return until !== null && Date.now() < until;
+  }
+
   private requireAutonomousDeployment(ticketId: string, revision: string): void {
     if (!this.autonomousDeploymentAllowed(ticketId, revision)) throw new Error("Autonomous preview deployment is no longer authorized by the active ticket state.");
   }
@@ -625,6 +635,7 @@ export class PreviewManager {
   private reconcileAutonomousIntent(preview: PreviewRecord): PreviewRecord {
     if (preview.autonomous && preview.ticketId && this.deps.store.getTicket(preview.ticketId)?.autonomousState?.hostMutation?.revision === preview.revision) return preview;
     if (!preview.autonomous || !preview.ticketId || preview.desiredState === "stopped" || this.autonomousDeploymentAllowed(preview.ticketId, preview.revision)) return preview;
+    if (this.retainedAfterDelivery(preview)) return preview;
     return this.update(preview.id, { desiredState: "stopped", status: "stopping", error: "Autonomous execution no longer permits deployment. Reconcile the owned preview resources." });
   }
 

@@ -25,7 +25,7 @@ const SETTLED_CARD_STATES: readonly CampaignCard["state"][] = ["merged", "blocke
 const MERGE_CONFLICT_FINGERPRINT = "merge-conflict";
 const INCIDENT_PREFIX = "incident:";
 const CONFLICT_WAITING_SLOT = "Merge conflict: waiting for a free slot to resolve it.";
-export const PAUSED_CARD_PREFIX = "Paused:";
+const PAUSED_CARD_PREFIX = "Paused:";
 const QUOTA_BACKOFF_BASE_MS = 5 * 60_000;
 const QUOTA_BACKOFF_MAX_MS = 2 * 60 * 60_000;
 const QUOTA_REFUSAL_RESET_MS = 60 * 60_000;
@@ -163,6 +163,11 @@ export class CampaignEngine {
     this.deps.onChange?.(campaignId);
   }
 
+  private campaignOfTicket(ticketId: string): Campaign | null {
+    const card = this.store.campaigns.getCardByTicket(ticketId);
+    return card === null ? this.store.campaigns.findByFinalTicket(ticketId) : this.store.campaigns.get(card.campaignId);
+  }
+
   private approvedPlan(campaign: Campaign): CampaignPlan {
     if (campaign.approvedVersion === null) throw new Error(`campaign ${campaign.id} has no approved version`);
     return this.store.campaigns.requireVersion(campaign.id, campaign.approvedVersion).plan;
@@ -221,11 +226,10 @@ export class CampaignEngine {
     this.store.campaigns.updateCard(campaign.id, card.cardId, { state: "suspended", blockedReason: `${PAUSED_CARD_PREFIX} ${reason}` }, this.now());
   }
 
-  async suspendRunningCards(campaignId: string, reason: string): Promise<number> {
+  private async suspendRunningCards(campaignId: string, reason: string): Promise<void> {
     const campaign = this.store.campaigns.require(campaignId);
     const running = this.store.campaigns.listCards(campaignId).filter((card) => card.state === "running");
     for (const card of running) await this.suspendCard(campaign, card, reason);
-    return running.length;
   }
 
   /** Progressive resumption: one paused card per pass, before any new start. */
@@ -245,8 +249,7 @@ export class CampaignEngine {
 
   /** A provider refused for quota: save state, stop starts and sessions, and show the provider and estimated resume time (FR9). */
   recordQuotaRefusal(ticketId: string, refusal: QuotaRefusal): void {
-    const card = this.store.campaigns.getCardByTicket(ticketId);
-    const campaign = card === null ? this.store.campaigns.findByFinalTicket(ticketId) : this.store.campaigns.get(card.campaignId);
+    const campaign = this.campaignOfTicket(ticketId);
     if (campaign === null || (campaign.status !== "running" && campaign.status !== "finalizing")) return;
     const now = this.now();
     const recent = campaign.runtime.lastQuotaResumeAt !== null && now - campaign.runtime.lastQuotaResumeAt < QUOTA_REFUSAL_RESET_MS;
@@ -567,8 +570,7 @@ export class CampaignEngine {
   /** Card notifications are withheld while their campaign executes; the final report is the only one (FR11). */
   silences(ticketId: string): boolean {
     try {
-      const card = this.store.campaigns.getCardByTicket(ticketId);
-      const campaign = card === null ? this.store.campaigns.findByFinalTicket(ticketId) : this.store.campaigns.get(card.campaignId);
+      const campaign = this.campaignOfTicket(ticketId);
       return campaign !== null && !TERMINAL_CAMPAIGN_STATUSES.includes(campaign.status);
     } catch {
       return false;

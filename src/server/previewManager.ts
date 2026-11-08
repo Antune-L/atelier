@@ -389,6 +389,15 @@ export class PreviewManager {
     }
   }
 
+  async createExternal(project: string, branch: string, expectedRevision: string, ownershipMarker: string) {
+    return this.trackRequest(this.operations.run(`external:${ownershipMarker}`, async () => {
+      const previous = this.list().find(item => item.ownershipMarker === ownershipMarker);
+      if (previous) return previous;
+      if (getProject(project).vcsProvider !== "github") throw new Error("Coolify previews currently support GitHub projects only.");
+      return this.launch(project, { ticketId: null, prUrl: null, branch, expectedRevision, ownershipMarker });
+    }));
+  }
+
   async createAutonomous(ticketId: string, requestedBranch: string, expectedRevision: string) {
     const branch = previewBranchSchema.parse(requestedBranch);
     return this.trackRequest(this.operations.run(`ticket:${ticketId}`, async () => {
@@ -419,7 +428,7 @@ export class PreviewManager {
     }));
   }
 
-  private async launch(projectKey: string, ownership: { ticketId: string | null; prUrl: string | null; branch?: string; autonomous?: boolean; expectedRevision?: string }, previous?: PreviewRecord | null) {
+  private async launch(projectKey: string, ownership: { ticketId: string | null; prUrl: string | null; branch?: string; autonomous?: boolean; expectedRevision?: string; ownershipMarker?: string }, previous?: PreviewRecord | null) {
     const projectSettings = this.projectSettings(projectKey);
     if (!projectSettings.enabled) throw new Error("Enable previews for this project before starting a preview.");
     const settings = this.settings;
@@ -462,7 +471,7 @@ export class PreviewManager {
     }
     const generation = (previous?.generation ?? 0) + 1;
     if (ownership.autonomous && ownership.ticketId) this.requireAutonomousDeployment(ownership.ticketId, source.revision);
-    const ownershipMarker = `kanban-preview-${crypto.randomUUID()}`;
+    const ownershipMarker = ownership.ownershipMarker ?? `kanban-preview-${crypto.randomUUID()}`;
     const preview = this.deps.store.createPreview({
       ticketId: ownership.ticketId, autonomous: ownership.autonomous ?? false, project: projectKey, prUrl: ownership.prUrl, repository: source.repository, repositoryHost: repository.host, revision: source.revision, branch: source.branch,
       generation, recipe, ownershipMarker, replacesPreviewId: previous?.id ?? null, coolifyBaseUrl: settings.baseUrl, serverUuid: settings.serverUuid,

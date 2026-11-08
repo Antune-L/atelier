@@ -101,3 +101,7 @@ Electrobun 1.18.1 postBuild runs before version.json is written, so a complete u
 - Source update maintenance must survive process death: write the data-root recovery receipt before Git/dependency mutation, keep interrupted boots closed, and clear prepared receipts only after revision, package metadata and native health checks. Never describe code restoration as database rollback.
 
 - Provider adoption must preserve the user's subscription authentication model. Qualify candidate binaries on trusted dedicated Linux/macOS runners with existing Claude/Codex logins; do not require API keys, export login directories to hosted CI, or replace effective provider homes. Keep workflow job names and artifact identifiers aligned with the backend and publisher even when runner labels change. Runner readiness is an operator declaration, not proof of live authentication.
+
+## External validation ownership
+
+External MCP validations reuse ticketless preview records and deterministic request ownership markers. Their private receipts and evidence must remain outside both the Atelier repository and validated project checkouts. Runner evidence paths can point to JSON observations or PNG screenshots; preserve their MIME types. Empty native cleanup directories are normal after confirmed closure; only retained obligation files indicate uncertainty. Restart must not replay user browser actions or infer native process death from successful preview deletion.

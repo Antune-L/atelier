@@ -275,6 +275,15 @@ afterAll(async () => {
   }
 });
 
+test("external validation MCP returns null for unknown requests and validates inputs", async () => {
+  if (!client) throw new Error("MCP client unavailable");
+  for (const name of ["get_external_validation", "cancel_external_validation"]) {
+    expect(structuredContent(await client.callTool({ name, arguments: { requestId: "missing-external-request" } }))).toEqual({ validation: null });
+  }
+  expect((await client.callTool({ name: "start_external_validation", arguments: { requestId: "invalid" } })).isError).toBe(true);
+  expect((await client.callTool({ name: "read_external_validation_artifact", arguments: { requestId: "missing-external-request", artifactId: "../../etc/passwd" } })).isError).toBe(true);
+});
+
 test("an official MCP client lists, creates idempotently, starts, and updates REST and WebSocket clients", async () => {
   if (client === null) throw new Error("client MCP non initialisé");
 
@@ -282,14 +291,18 @@ test("an official MCP client lists, creates idempotently, starts, and updates RE
   const ticketTools = [
     "analyze_tickets",
     "answer_question",
+    "cancel_external_validation",
     "create_review_ticket",
     "create_todo_ticket",
     "get_application_version",
     "get_capacity",
+    "get_external_validation",
     "get_ticket",
     "list_open_prs",
     "list_projects",
     "list_tickets",
+    "read_external_validation_artifact",
+    "start_external_validation",
     "start_ticket",
     "update_ticket",
   ];

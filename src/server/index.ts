@@ -1,3 +1,5 @@
+import { createHash as externalRootHash } from "node:crypto";
+import { homedir } from "node:os";
 import { chmodSync, rmSync } from "node:fs";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +56,7 @@ import { KeyedMutex } from "./mutex.ts";
 import { Notifier } from "./notifier.ts";
 import { PrNotificationMonitor } from "./prNotificationMonitor.ts";
 import { PreviewConfig } from "./previewConfig.ts";
+import { ExternalValidationManager } from "./externalValidation.ts";
 import { PreviewManager } from "./previewManager.ts";
 import { seedPreviewDemoData } from "./previewSeed.ts";
 import { PublicMcpManager } from "./publicMcp.ts";
@@ -390,9 +393,10 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const automationManager = new AutomationManager(store, system, clientHub);
   const auditManager = new AuditManager({ store, system, hub: clientHub, notifier, repoMutex, ticketOperations, slots: slotManager });
   const launchScheduler = new LaunchScheduler({ store, ticketOperations, slots: slotManager, hub: clientHub, notifier, startedAt: backendStartedAt, isMaintenance: () => system.sourceUpdateAdmission.isUpdating });
+  const previewConfig = new PreviewConfig(dataRoot, { dryRun: system.dryRun });
   const previewManager = new PreviewManager({
     store,
-    config: new PreviewConfig(dataRoot, { dryRun: system.dryRun }),
+    config: previewConfig,
     system,
     quality: qualityManager,
     ticketOperations,
@@ -441,6 +445,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     onChange: () => campaignEngine.wake(),
   });
   const campaignEngine = buildCampaignEngine({ store, system, slots: slotManager, lifecycle, notifier, service: campaignService, sessionHub, quota: (provider) => quotaService.read(provider), previews: previewManager, dryRun: system.dryRun, dataRoot });
+  const externalValidation = new ExternalValidationManager(join(homedir(), ".local", "share", "atelier", "external-validations", externalRootHash("sha256").update(resolve(dbPath)).digest("hex").slice(0, 16)), previewManager, previewConfig, system);
   const configuredMcpToken = opts.mcpToken === undefined ? process.env.KANBAN_MCP_TOKEN : opts.mcpToken;
   const mcpToken = configuredMcpToken?.trim() || null;
   const publicMcpManager = mcpToken === null
@@ -457,6 +462,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
         desktopUpdates: opts.desktopUpdates,
         cloud: isCloudHost(),
       }),
+      externalValidation,
     );
 
   await opts.beforeRecovery?.();
@@ -467,6 +473,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       await runFirstBootSetup(store, system);
       await qualityManager.recover();
       await previewManager.recover();
+      await externalValidation.recover();
       await slotManager.recover();
       await autonomousWorkflow.recover();
       await triageManager.recoverStale();
@@ -677,6 +684,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       await coordinator.stopAutonomousDeliveries();
       await autonomousWorkflow.shutdown();
       await slotManager.drainAutonomousPublications();
+      await externalValidation.shutdown();
       await previewManager.shutdown();
       await qualityManager.shutdown();
       await slotManager.teardownSessions();
@@ -689,6 +697,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       await coordinator.stopAutonomousDeliveries();
       await autonomousWorkflow.shutdown();
       await slotManager.drainAutonomousPublications();
+      await externalValidation.shutdown();
       await previewManager.shutdown();
       await qualityManager.shutdown();
       await prNotificationMonitor.stop();

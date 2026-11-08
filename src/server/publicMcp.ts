@@ -1,3 +1,5 @@
+import { startExternalValidationSchema, externalRequestSchema, externalArtifactRequestSchema, externalValidationOutputSchema, externalArtifactOutputSchema } from "../shared/externalValidation.ts";
+import type { ExternalValidationManager } from "./externalValidation.ts";
 import { timingSafeEqual } from "node:crypto";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -217,6 +219,12 @@ const getCapacityOutputSchema = z.object({
 });
 
 const PUBLIC_TOOLS = [
+  ...[
+    { name: "start_external_validation", description: "Starts independent browser validation of an exact pushed SHA without creating a ticket. Reconcile uncertain calls with get_external_validation.", input: startExternalValidationSchema, output: externalValidationOutputSchema },
+    { name: "get_external_validation", description: "Reconciles a validation receipt by caller request ID; unknown requests return null.", input: externalRequestSchema, output: externalValidationOutputSchema },
+    { name: "cancel_external_validation", description: "Cancels validation and stops its owned preview; repeat to reconcile cleanup.", input: externalRequestSchema, output: externalValidationOutputSchema },
+    { name: "read_external_validation_artifact", description: "Reads an owned retained artifact, up to 512000 base64 characters, with its SHA-256 digest.", input: externalArtifactRequestSchema, output: externalArtifactOutputSchema },
+  ].map(tool => ({ name: tool.name, description: tool.description, inputSchema: z.toJSONSchema(tool.input), outputSchema: z.toJSONSchema(tool.output) })),
   {
     name: "get_application_version",
     description: "Reads the installed Atelier application version and an accessible verified update target. Source installations report the startup commit, never provider versions. Unavailable data includes stable reason codes.",
@@ -417,7 +425,7 @@ export async function serveStatelessMcp(server: Server, request: Request, parsed
 
 type QuestionAnswerer = Pick<AgentCoordinator, "submitUserComment">;
 
-function createMcpServer(operations: TicketOperations, coordinator: QuestionAnswerer, dryRun: boolean, campaigns: CampaignService | null, readApplicationVersion: () => Promise<ApplicationVersion>): Server {
+function createMcpServer(operations: TicketOperations, coordinator: QuestionAnswerer, dryRun: boolean, campaigns: CampaignService | null, readApplicationVersion: () => Promise<ApplicationVersion>, external?: ExternalValidationManager): Server {
   const tools = campaigns === null ? PUBLIC_TOOLS : [...PUBLIC_TOOLS, ...CAMPAIGN_TOOLS];
   return createToolServer(tools, async (request): Promise<McpTextResult> => {
     const input = request.params.arguments ?? {};
@@ -426,6 +434,23 @@ function createMcpServer(operations: TicketOperations, coordinator: QuestionAnsw
         const parsed = applicationVersionInputSchema.safeParse(input);
         if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
         return toolResult(applicationVersionSchema, await readApplicationVersion());
+      }
+      if (request.params.name.includes("external_validation")) {
+        if (!external) return errorResult("UNAVAILABLE", "External validation is unavailable");
+        const name = request.params.name;
+        try {
+          if (name === "start_external_validation") return toolResult(externalValidationOutputSchema, { validation: await external.start(startExternalValidationSchema.parse(input)) });
+          if (name === "read_external_validation_artifact") {
+            const args = externalArtifactRequestSchema.parse(input);
+            return toolResult(externalArtifactOutputSchema, await external.artifact(args.requestId, args.artifactId));
+          }
+          const args = externalRequestSchema.parse(input);
+          if (name === "get_external_validation") return toolResult(externalValidationOutputSchema, { validation: await external.get(args.requestId) });
+          if (name === "cancel_external_validation") return toolResult(externalValidationOutputSchema, { validation: await external.cancel(args.requestId) });
+        } catch (error) {
+          if (error instanceof z.ZodError) return invalidInput(error.issues[0]?.message ?? "Invalid input");
+          return errorResult("VALIDATION_ERROR", error instanceof Error ? error.message : "External validation failed");
+        }
       }
       if (request.params.name === "list_projects") {
         const parsed = listProjectsInputSchema.safeParse(input);
@@ -541,6 +566,7 @@ export class PublicMcpManager {
     private readonly dryRun: boolean,
     private readonly campaigns: CampaignService | null = null,
     private readonly readApplicationVersion: () => Promise<ApplicationVersion> = createApplicationVersionReader({ sourceRevision: null, cloud: false }),
+    private readonly external?: ExternalValidationManager,
   ) {
     this.token = token;
   }
@@ -565,6 +591,6 @@ export class PublicMcpManager {
       return jsonResponse(HTTP_BAD_REQUEST, "only MCP POST requests are accepted");
     }
 
-    return serveStatelessMcp(createMcpServer(this.operations, this.coordinator, this.dryRun, this.campaigns, this.readApplicationVersion), request);
+    return serveStatelessMcp(createMcpServer(this.operations, this.coordinator, this.dryRun, this.campaigns, this.readApplicationVersion, this.external), request);
   }
 }

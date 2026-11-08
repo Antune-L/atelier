@@ -157,7 +157,8 @@ export const campaignSkillFingerprintSchema = z.object({
 });
 export type CampaignSkillFingerprint = z.infer<typeof campaignSkillFingerprintSchema>;
 
-export type CampaignPlanIssue = { code: string; message: string; path?: string };
+export const campaignPlanIssueSchema = z.object({ code: z.string(), message: z.string(), path: z.string().optional() });
+export type CampaignPlanIssue = z.infer<typeof campaignPlanIssueSchema>;
 
 export function campaignDescendants(cards: readonly Pick<CampaignCardPlan, "id" | "dependsOn">[], roots: Iterable<string>): Set<string> {
   const result = new Set<string>();
@@ -365,6 +366,16 @@ export const campaignFinalizationSchema = z.object({
   reserveUsedTokens: z.number().int().nonnegative(),
 });
 export type CampaignFinalization = z.infer<typeof campaignFinalizationSchema>;
+
+export type CampaignCriterionResult = CampaignFinalization["criteria"][number];
+
+export function missingCriterionResult(id: string): CampaignCriterionResult {
+  return { id, status: "missing", evidence: null, revision: null };
+}
+
+export function missingGlobalCriteria(plan: Pick<CampaignPlan, "globalCriteria">): CampaignCriterionResult[] {
+  return plan.globalCriteria.flatMap((criterion) => (criterion.id === undefined ? [] : [missingCriterionResult(criterion.id)]));
+}
 
 export const campaignExtensionSchema = z.object({
   deadlineAt: isoDateSchema,

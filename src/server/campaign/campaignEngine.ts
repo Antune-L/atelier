@@ -1,5 +1,5 @@
-import { TERMINAL_CAMPAIGN_STATUSES, campaignDescendants, effectiveSchedule } from "../../shared/campaign.ts";
-import type { Campaign, CampaignCard, CampaignCardPlan, CampaignFinalization, CampaignPlan, CampaignRuntime } from "../../shared/campaign.ts";
+import { TERMINAL_CAMPAIGN_STATUSES, campaignDescendants, effectiveSchedule, missingCriterionResult, missingGlobalCriteria } from "../../shared/campaign.ts";
+import type { Campaign, CampaignCard, CampaignCardPlan, CampaignFinalization, CampaignPlan, CampaignRepair, CampaignRuntime } from "../../shared/campaign.ts";
 import type { VcsProvider } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { PreviewRecord } from "../../shared/preview.ts";
@@ -14,20 +14,21 @@ import type { PrSnapshot } from "../system/vcs/types.ts";
 import { readCampaignSkills, readSkillInstructions } from "./campaignSkills.ts";
 import type { CampaignSkillRoots } from "./campaignSkills.ts";
 import { campaignCardDescription, campaignCardTicket, campaignFinalDescription, campaignFinalTicket, parseCampaignDecisions } from "./cardTicket.ts";
+import type { CardSkillGuidance } from "./cardTicket.ts";
 import { consumedTokens, defectFingerprint, isEnvironmentIncident } from "./policies.ts";
 import { quotaAvailability } from "./quotaAvailability.ts";
 import { buildCampaignReport, campaignReportNotification } from "./report.ts";
 
 const log = createLogger("campaign");
 
-export const CAMPAIGN_TICK_MS = 15_000;
+const CAMPAIGN_TICK_MS = 15_000;
 const MAX_ENVIRONMENT_RETRIES = 3;
 const ACTIVE_CARD_STATES: readonly CampaignCard["state"][] = ["running", "merging"];
 const SETTLED_CARD_STATES: readonly CampaignCard["state"][] = ["merged", "blocked", "stopped"];
 const MERGE_CONFLICT_FINGERPRINT = "merge-conflict";
 const INCIDENT_PREFIX = "incident:";
 const CONFLICT_WAITING_SLOT = "Merge conflict: waiting for a free slot to resolve it.";
-export const PAUSED_CARD_PREFIX = "Paused:";
+const PAUSED_CARD_PREFIX = "Paused:";
 const QUOTA_BACKOFF_BASE_MS = 5 * 60_000;
 const QUOTA_BACKOFF_MAX_MS = 2 * 60 * 60_000;
 const QUOTA_REFUSAL_RESET_MS = 60 * 60_000;
@@ -104,6 +105,20 @@ export interface CampaignEngineDeps {
   notify(title: string, body: string): void;
   now?(): number;
   onChange?(campaignId: string): void;
+}
+
+function skippedFinalizationCause(mergedCount: number, incomplete: boolean, partialDelivery: CampaignPlan["partialDelivery"]): string | null {
+  if (mergedCount === 0) return "No change was merged into the mother branch; no pull request is opened.";
+  if (incomplete && partialDelivery === "report_only") return "The campaign is incomplete and the plan asks for the report only.";
+  return null;
+}
+
+function repairCount(card: CampaignCard, fingerprint: string): number {
+  return card.repairs.find((repair) => repair.fingerprint === fingerprint)?.count ?? 0;
+}
+
+function withRepairCount(card: CampaignCard, fingerprint: string, count: number): CampaignRepair[] {
+  return [...card.repairs.filter((repair) => repair.fingerprint !== fingerprint), { fingerprint, count }];
 }
 
 /**
@@ -213,6 +228,11 @@ export class CampaignEngine {
   private event(campaignId: string, type: string, payload: Record<string, unknown> = {}): void {
     this.store.campaigns.appendEvent(campaignId, type, payload, this.now());
     this.deps.onChange?.(campaignId);
+  }
+
+  private campaignOfTicket(ticketId: string): Campaign | null {
+    const card = this.store.campaigns.getCardByTicket(ticketId);
+    return card === null ? this.store.campaigns.findByFinalTicket(ticketId) : this.store.campaigns.get(card.campaignId);
   }
 
   private approvedPlan(campaign: Campaign): CampaignPlan {
@@ -331,18 +351,16 @@ export class CampaignEngine {
       previewKeepUntil: effectiveSchedule(plan, campaign.runtime).reviewUntil,
       previewCleanup: null,
       previewCleanupError: null,
-      criteria: plan.globalCriteria.flatMap((criterion) => (criterion.id === undefined ? [] : [{ id: criterion.id, status: "missing" as const, evidence: null, revision: null }])),
+      criteria: missingGlobalCriteria(plan),
       reserveUsedTokens: 0,
     };
-    const skip = merged.length === 0 ? "No change was merged into the mother branch; no pull request is opened." : incomplete && plan.partialDelivery === "report_only" ? "The campaign is incomplete and the plan asks for the report only." : null;
+    const skip = skippedFinalizationCause(merged.length, incomplete, plan.partialDelivery);
     if (skip !== null) {
       this.store.campaigns.update(campaignId, { status: "awaiting_report", runtime: { ...campaign.runtime, finalization, endedAt: now, statusReason: skip } }, now);
       this.event(campaignId, CAMPAIGN_ENGINE_EVENT.finalizationSkipped, { reason, cause: skip });
       return;
     }
-    const skills = readCampaignSkills(this.deps.skillRoots);
-    const guidance = skills.map((fingerprint) => ({ name: fingerprint.name, fingerprint, instructions: readSkillInstructions(fingerprint.name, this.deps.skillRoots) }));
-    const description = campaignFinalDescription(plan, mother, base, missing, guidance);
+    const description = campaignFinalDescription(plan, mother, base, missing, this.skillGuidance());
     const { ticket } = this.store.createTicketIdempotent(`campaign:${campaignId}:final:${campaign.runtime.extensions.length}`, JSON.stringify({ campaign: campaignId, final: campaign.runtime.extensions.length }), campaignFinalTicket(plan, base, description, incomplete, now, effectiveSchedule(plan, campaign.runtime).reportAt), (created) => {
       this.store.campaigns.update(campaignId, { status: "finalizing", finalTicketId: created.id, runtime: { ...campaign.runtime, finalization: { ...finalization, prDraft: incomplete } } }, now);
     });
@@ -426,13 +444,14 @@ export class CampaignEngine {
       criteria: this.criteriaResults(ticket, finalization),
     };
     const published = state?.phase === "completed" || state?.phase === "published_partial";
-    if (published && ticket.prUrl !== null) {
-      next.prUrl = ticket.prUrl;
+    const finalPrUrl = published ? ticket.prUrl : null;
+    if (finalPrUrl !== null) {
+      next.prUrl = finalPrUrl;
       next.prDraft = state?.phase === "published_partial" ? true : ticket.prDraft;
     }
     this.updateRuntime(campaign.id, (runtime) => ({ ...runtime, finalization: next }));
-    if (published && ticket.prUrl !== null) {
-      if (finalization.prUrl === null) this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.finalPullRequest, { prUrl: ticket.prUrl, draft: next.prDraft, revision: next.frozenRevision });
+    if (finalPrUrl !== null) {
+      if (finalization.prUrl === null) this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.finalPullRequest, { prUrl: finalPrUrl, draft: next.prDraft, revision: next.frozenRevision });
       this.endFinalization(campaign.id, null);
       return;
     }
@@ -441,8 +460,9 @@ export class CampaignEngine {
       this.endFinalization(campaign.id, ticket.error ?? "The final card stopped without a pull request.");
       return;
     }
-    if (reserveUsed > plan.budget.finalReserveTokens || this.now() >= effectiveSchedule(plan, campaign.runtime).reportAt) {
-      const cause = reserveUsed > plan.budget.finalReserveTokens ? "The final reserve is exhausted." : "The report time arrived before the final pull request.";
+    const reserveExhausted = reserveUsed > plan.budget.finalReserveTokens;
+    if (reserveExhausted || this.now() >= effectiveSchedule(plan, campaign.runtime).reportAt) {
+      const cause = reserveExhausted ? "The final reserve is exhausted." : "The report time arrived before the final pull request.";
       await this.deps.slots.interruptForCampaign(ticket.id, cause);
       this.endFinalization(campaign.id, cause);
     }
@@ -452,13 +472,14 @@ export class CampaignEngine {
   private criteriaResults(ticket: Ticket, finalization: CampaignFinalization): CampaignFinalization["criteria"] {
     const revision = ticket.autonomousState?.revision ?? null;
     const runId = ticket.autonomousState?.previewRunId ?? null;
-    if (revision === null || runId === null) return finalization.criteria.map((criterion) => ({ ...criterion, status: "missing", evidence: null, revision: null }));
+    const unproven = finalization.criteria.map((criterion) => missingCriterionResult(criterion.id));
+    if (revision === null || runId === null) return unproven;
     const quality = this.store.getTicketQuality(ticket.id);
     const run = quality.runs.find((entry) => entry.id === runId);
-    if (!run || run.simulated || run.revision !== revision) return finalization.criteria.map((criterion) => ({ ...criterion, status: "missing", evidence: null, revision: null }));
+    if (!run || run.simulated || run.revision !== revision) return unproven;
     return finalization.criteria.map((criterion) => {
       const evidence = quality.evidence.filter((entry) => entry.runId === runId && entry.criterionId === criterion.id).at(-1);
-      if (!evidence) return { ...criterion, status: "missing", evidence: null, revision: null };
+      if (!evidence) return missingCriterionResult(criterion.id);
       return { ...criterion, status: evidence.status, evidence: evidence.artifactPath ?? evidence.summary, revision };
     });
   }
@@ -512,11 +533,10 @@ export class CampaignEngine {
     }
   }
 
-  async suspendRunningCards(campaignId: string, reason: string): Promise<number> {
+  private async suspendRunningCards(campaignId: string, reason: string): Promise<void> {
     const campaign = this.store.campaigns.require(campaignId);
     const running = this.store.campaigns.listCards(campaignId).filter((card) => card.state === "running");
     for (const card of running) await this.suspendCard(campaign, card, reason);
-    return running.length;
   }
 
   /** Progressive resumption: one paused card per pass, before any new start. */
@@ -536,8 +556,7 @@ export class CampaignEngine {
 
   /** A provider refused for quota: save state, stop starts and sessions, and show the provider and estimated resume time (FR9). */
   recordQuotaRefusal(ticketId: string, refusal: QuotaRefusal): void {
-    const card = this.store.campaigns.getCardByTicket(ticketId);
-    const campaign = card === null ? this.store.campaigns.findByFinalTicket(ticketId) : this.store.campaigns.get(card.campaignId);
+    const campaign = this.campaignOfTicket(ticketId);
     if (campaign === null || (campaign.status !== "running" && campaign.status !== "finalizing")) return;
     const now = this.now();
     const recent = campaign.runtime.lastQuotaResumeAt !== null && now - campaign.runtime.lastQuotaResumeAt < QUOTA_REFUSAL_RESET_MS;
@@ -596,9 +615,12 @@ export class CampaignEngine {
     return mother;
   }
 
+  private skillGuidance(): CardSkillGuidance[] {
+    return readCampaignSkills(this.deps.skillRoots).map((fingerprint) => ({ name: fingerprint.name, fingerprint, instructions: readSkillInstructions(fingerprint.name, this.deps.skillRoots) }));
+  }
+
   private ensureCards(campaign: Campaign, plan: CampaignPlan, mother: string): void {
-    const skills = readCampaignSkills(this.deps.skillRoots);
-    const guidance = skills.map((fingerprint) => ({ name: fingerprint.name, fingerprint, instructions: readSkillInstructions(fingerprint.name, this.deps.skillRoots) }));
+    const guidance = this.skillGuidance();
     for (const planCard of plan.cards) {
       const card = this.store.campaigns.upsertCard(campaign.id, planCard.id, campaign.approvedVersion ?? 1, this.now());
       if (card.ticketId !== null || card.state === "stopped") continue;
@@ -675,6 +697,12 @@ export class CampaignEngine {
     this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.cardMerged, { cardId: card.cardId, prUrl: ticket.prUrl, decisions: decisions.length });
   }
 
+  private async confirmMerge(campaign: Campaign, card: CampaignCard, ticket: Ticket, operationId: string, result: { mergeCommitSha: string | null; reconciled?: boolean }): Promise<void> {
+    this.store.campaigns.completeOperation(operationId, "done", result, this.now());
+    await this.deps.slots.markMerged(ticket.id);
+    this.recordMerged(campaign, card, this.store.getTicket(ticket.id) ?? ticket, result.mergeCommitSha);
+  }
+
   /** A failed or stalled card is retried for environment incidents; the same defect is repaired at most `maxSameDefectRepairs` times (FR5). */
   private async repairCards(campaign: Campaign): Promise<void> {
     const plan = this.approvedPlan(campaign);
@@ -688,14 +716,13 @@ export class CampaignEngine {
       const reason = ticket.error ?? "The card session stopped.";
       const incident = isEnvironmentIncident(reason);
       const fingerprint = incident ? `${INCIDENT_PREFIX}${defectFingerprint(reason)}` : defectFingerprint(reason);
-      const previous = card.repairs.find((repair) => repair.fingerprint === fingerprint)?.count ?? 0;
+      const previous = repairCount(card, fingerprint);
       const limit = incident ? MAX_ENVIRONMENT_RETRIES : plan.budget.maxSameDefectRepairs;
       if (previous >= limit) {
         this.block(campaign, plan, card.cardId, incident ? `Environment incident persists: ${reason}` : `Same defect after ${previous} repairs: ${reason}`);
         continue;
       }
-      const repairs = [...card.repairs.filter((repair) => repair.fingerprint !== fingerprint), { fingerprint, count: previous + 1 }];
-      this.store.campaigns.updateCard(campaign.id, card.cardId, { repairs }, this.now());
+      this.store.campaigns.updateCard(campaign.id, card.cardId, { repairs: withRepairCount(card, fingerprint, previous + 1) }, this.now());
       this.event(campaign.id, incident ? CAMPAIGN_ENGINE_EVENT.incident : CAMPAIGN_ENGINE_EVENT.cardRepaired, { cardId: card.cardId, reason, attempt: previous + 1 });
       try {
         await this.deps.slots.retry(ticket.id);
@@ -740,7 +767,7 @@ export class CampaignEngine {
       this.block(campaign, plan, card.cardId, "The card has no pull request to merge.");
       return;
     }
-    const attempt = card.repairs.find((repair) => repair.fingerprint === MERGE_CONFLICT_FINGERPRINT)?.count ?? 0;
+    const attempt = repairCount(card, MERGE_CONFLICT_FINGERPRINT);
     if (card.blockedReason === CONFLICT_WAITING_SLOT) {
       await this.afterResolution(campaign, plan, card.cardId, await this.deps.slots.resolveCampaignConflict(ticket.id, CONFLICT_WAITING_SLOT), CONFLICT_WAITING_SLOT, attempt, mother);
       return;
@@ -755,9 +782,7 @@ export class CampaignEngine {
       return;
     }
     if (snapshot.state === "merged") {
-      this.store.campaigns.completeOperation(operationId, "done", { mergeCommitSha: snapshot.mergeCommitSha, reconciled: operation.status === "intent" }, this.now());
-      await this.deps.slots.markMerged(ticket.id);
-      this.recordMerged(campaign, card, this.store.getTicket(ticket.id) ?? ticket, snapshot.mergeCommitSha);
+      await this.confirmMerge(campaign, card, ticket, operationId, { mergeCommitSha: snapshot.mergeCommitSha, reconciled: operation.status === "intent" });
       return;
     }
     if (snapshot.state === "closed") {
@@ -768,15 +793,12 @@ export class CampaignEngine {
     const result = await this.deps.vcs.mergePr(project.repoPath, ticket.branch, ticket.prUrl, project.vcsProvider);
     if (result.ok) {
       const merged = await this.deps.vcs.readPr(project.repoPath, ticket.prUrl, project.vcsProvider);
-      this.store.campaigns.completeOperation(operationId, "done", { mergeCommitSha: merged.mergeCommitSha }, this.now());
-      await this.deps.slots.markMerged(ticket.id);
-      this.recordMerged(campaign, card, this.store.getTicket(ticket.id) ?? ticket, merged.mergeCommitSha);
+      await this.confirmMerge(campaign, card, ticket, operationId, { mergeCommitSha: merged.mergeCommitSha });
       return;
     }
     if (result.pending) return;
     this.store.campaigns.completeOperation(operationId, "failed", { reason: result.reason }, this.now());
-    const repairs = [...card.repairs.filter((repair) => repair.fingerprint !== MERGE_CONFLICT_FINGERPRINT), { fingerprint: MERGE_CONFLICT_FINGERPRINT, count: attempt + 1 }];
-    this.store.campaigns.updateCard(campaign.id, card.cardId, { repairs }, this.now());
+    this.store.campaigns.updateCard(campaign.id, card.cardId, { repairs: withRepairCount(card, MERGE_CONFLICT_FINGERPRINT, attempt + 1) }, this.now());
     const resolution = await this.deps.slots.resolveCampaignConflict(ticket.id, result.reason);
     await this.afterResolution(campaign, plan, card.cardId, resolution, result.reason, attempt + 1, mother);
   }
@@ -809,13 +831,13 @@ export class CampaignEngine {
     }
   }
 
-  envelopeRemaining(campaign: Campaign, plan: CampaignPlan): number {
+  private envelopeRemaining(campaign: Campaign, plan: CampaignPlan): number {
     const used = this.store.campaigns.listCards(campaign.id).reduce((sum, card) => sum + card.tokensUsed, 0);
     const extra = campaign.runtime.extensions.reduce((sum, extension) => sum + extension.additionalTokens, 0);
     return plan.budget.totalTokens + extra - plan.budget.finalReserveTokens - used;
   }
 
-  missingPrerequisites(campaign: Campaign, planCard: CampaignCardPlan): string[] {
+  private missingPrerequisites(campaign: Campaign, planCard: CampaignCardPlan): string[] {
     return planCard.dependsOn.filter((dependency) => this.store.campaigns.getCard(campaign.id, dependency)?.state !== "merged");
   }
 
@@ -839,8 +861,8 @@ export class CampaignEngine {
       const ticket = this.store.getTicket(card.ticketId);
       if (!ticket || ticket.column !== "todo") continue;
       const operationId = `start:${campaign.id}:${card.cardId}:${card.planVersion}`;
-      const { created } = this.store.campaigns.beginOperation(campaign.id, operationId, "start_card", { cardId: card.cardId, ticketId: ticket.id }, this.now());
-      if (!created && this.store.campaigns.getOperation(operationId)?.status === "done") continue;
+      const { operation } = this.store.campaigns.beginOperation(campaign.id, operationId, "start_card", { cardId: card.cardId, ticketId: ticket.id }, this.now());
+      if (operation.status === "done") continue;
       this.store.campaigns.updateCard(campaign.id, card.cardId, { state: "running" }, this.now());
       this.updateRuntime(campaign.id, (runtime) => ({ ...runtime, sessionsStarted: runtime.sessionsStarted + 1 }));
       try {
@@ -858,8 +880,7 @@ export class CampaignEngine {
   /** Card notifications are withheld while their campaign executes; the final report is the only one (FR11). */
   silences(ticketId: string): boolean {
     try {
-      const card = this.store.campaigns.getCardByTicket(ticketId);
-      const campaign = card === null ? this.store.campaigns.findByFinalTicket(ticketId) : this.store.campaigns.get(card.campaignId);
+      const campaign = this.campaignOfTicket(ticketId);
       return campaign !== null && !TERMINAL_CAMPAIGN_STATUSES.includes(campaign.status);
     } catch {
       return false;

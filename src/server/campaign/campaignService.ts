@@ -23,6 +23,7 @@ import type {
   CampaignSkillFingerprint,
   CampaignVersion,
 } from "../../shared/campaign.ts";
+import { getErrorMessage } from "../../shared/errors.ts";
 import type { CampaignStore } from "../db/campaignStore.ts";
 import { TicketOperationError } from "../ticketOperations.ts";
 
@@ -74,7 +75,7 @@ export const installCampaignSkillInputSchema = z.object({
 
 const commandBaseSchema = z.object({
   requestId: requestIdSchema,
-  campaignId: z.string().trim().min(1),
+  campaignId: campaignIdSchema,
   version: z.number().int().positive().optional(),
 });
 export const pauseCampaignInputSchema = commandBaseSchema;
@@ -92,7 +93,7 @@ export interface CampaignLifecycle {
   resume(campaignId: string, extension: { deadlineAt: string; additionalTokens: number } | null): Promise<Campaign>;
 }
 
-const commandResultSchema = z.object({ campaignId: z.string(), status: z.enum(CAMPAIGN_STATUSES), statusReason: z.string().nullable() });
+export const commandResultSchema = z.object({ campaignId: z.string(), status: z.enum(CAMPAIGN_STATUSES), statusReason: z.string().nullable() });
 export type CampaignCommandResult = z.infer<typeof commandResultSchema>;
 
 export const getCampaignInputSchema = z.object({
@@ -156,21 +157,16 @@ export class CampaignService {
     return this.lifecycle;
   }
 
-  /** A command naming a stale version is refused with the current one (FR13). */
-  private assertCurrentVersion(campaign: Campaign, version: number | undefined): void {
-    if (version !== undefined && version !== campaign.currentVersion) throw staleVersion(version, campaign.currentVersion);
-  }
-
   private async command(name: string, input: z.infer<typeof commandBaseSchema>, run: (campaign: Campaign) => Promise<Campaign>): Promise<CampaignCommandResult> {
     return this.once(input.requestId, name, commandResultSchema, async () => {
       const campaign = this.requireCampaign(input.campaignId);
-      this.assertCurrentVersion(campaign, input.version);
+      assertCurrentVersion(campaign, input.version);
       let updated: Campaign;
       try {
         updated = await run(campaign);
       } catch (error) {
         if (error instanceof TicketOperationError) throw error;
-        throw new TicketOperationError("CONFLICT", error instanceof Error ? error.message : String(error));
+        throw new TicketOperationError("CONFLICT", getErrorMessage(error));
       }
       return { campaignId: campaign.id, result: { campaignId: campaign.id, status: updated.status, statusReason: updated.runtime.statusReason } };
     });

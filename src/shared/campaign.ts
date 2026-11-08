@@ -546,6 +546,11 @@ export const campaignReportSchema = z.object({
 });
 export type CampaignReport = z.infer<typeof campaignReportSchema>;
 
+/** Approved token envelope plus every explicit extension (FR12). */
+export function campaignEnvelopeTokens(plan: CampaignPlan, runtime: Pick<CampaignRuntime, "extensions">): number {
+  return plan.budget.totalTokens + runtime.extensions.reduce((sum, extension) => sum + extension.additionalTokens, 0);
+}
+
 export interface EffectiveSchedule {
   deadlineAt: number;
   reportAt: number;

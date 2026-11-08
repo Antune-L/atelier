@@ -1,4 +1,4 @@
-import { campaignReportSchema } from "../../shared/campaign.ts";
+import { campaignEnvelopeTokens, campaignReportSchema, missingGlobalCriteria } from "../../shared/campaign.ts";
 import type { Campaign, CampaignCard, CampaignOperation, CampaignPlan, CampaignReport, CampaignSkillFingerprint, CampaignVerdict } from "../../shared/campaign.ts";
 
 import { redactCampaignUrls } from "./redaction.ts";
@@ -37,7 +37,7 @@ export function campaignVerdict(input: ReportInput): CampaignVerdict {
 export function buildCampaignReport(input: ReportInput): CampaignReport {
   const { campaign, plan, cards } = input;
   const finalization = campaign.runtime.finalization;
-  const criteria = finalization?.criteria ?? plan.globalCriteria.flatMap((criterion) => (criterion.id === undefined ? [] : [{ id: criterion.id, status: "missing" as const, evidence: null, revision: null }]));
+  const criteria = finalization?.criteria ?? missingGlobalCriteria(plan);
   const tokensUsed = cards.reduce((sum, card) => sum + card.tokensUsed, 0) + input.finalTokens;
   const report: CampaignReport = {
     verdict: campaignVerdict(input),
@@ -77,7 +77,7 @@ export function buildCampaignReport(input: ReportInput): CampaignReport {
     pendingQuestions: campaign.runtime.pendingQuestions,
     consumption: {
       tokensUsed,
-      envelopeTokens: plan.budget.totalTokens + campaign.runtime.extensions.reduce((sum, extension) => sum + extension.additionalTokens, 0),
+      envelopeTokens: campaignEnvelopeTokens(plan, campaign.runtime),
       reserveTokens: plan.budget.finalReserveTokens,
       reserveUsedTokens: finalization?.reserveUsedTokens ?? 0,
       sessions: campaign.runtime.sessionsStarted,
@@ -88,18 +88,11 @@ export function buildCampaignReport(input: ReportInput): CampaignReport {
   return campaignReportSchema.parse(redactCampaignUrls(report));
 }
 
-const VERDICT_LABELS: Record<CampaignVerdict, string> = {
-  unknown: "unknown",
-  ready: "ready",
-  partial: "partial",
-  blocked: "blocked",
-};
-
 /** One aggregated notification: the only one the campaign emits (FR11). */
 export function campaignReportNotification(campaign: Campaign, report: CampaignReport): { title: string; body: string } {
   const pr = report.finalPr.url === null ? "no final pull request" : `final PR ${report.finalPr.url}${report.finalPr.draft ? " (draft)" : ""}`;
   return {
-    title: `Campaign ${VERDICT_LABELS[report.verdict]}: ${campaign.title}`,
+    title: `Campaign ${report.verdict}: ${campaign.title}`,
     body: `${report.cards.merged}/${report.cards.total} cards merged, ${report.criteria.validated}/${report.criteria.total} criteria validated, ${pr}.`,
   };
 }

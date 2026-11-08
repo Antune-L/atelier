@@ -8,6 +8,7 @@ import {
   approveCampaignInputSchema,
   cancelCampaignInputSchema,
   checkCampaignReadinessInputSchema,
+  commandResultSchema,
   getCampaignInputSchema,
   installCampaignSkillInputSchema,
   pauseCampaignInputSchema,
@@ -60,7 +61,7 @@ const getOutputSchema = z.object({
   dryRun: z.boolean(),
 });
 
-const commandOutputSchema = z.object({ campaignId: z.string(), status: z.enum(CAMPAIGN_STATUSES), statusReason: z.string().nullable(), dryRun: z.boolean() });
+const commandOutputSchema = commandResultSchema.extend({ dryRun: z.boolean() });
 
 const listInputSchema = z.object({ project: z.string().optional() });
 const listOutputSchema = z.object({ campaigns: z.array(looseObject), dryRun: z.boolean() });

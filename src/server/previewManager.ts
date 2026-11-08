@@ -624,8 +624,7 @@ export class PreviewManager {
     if (preview.ticketId === null) return false;
     const state = this.deps.store.getTicket(preview.ticketId)?.autonomousState;
     if (!state?.deliveryConfirmation || state.deliveryConfirmation.revision !== preview.revision) return false;
-    const until = campaignPreviewRetainedUntil(this.deps.store, preview.ticketId);
-    return until !== null && Date.now() < until;
+    return campaignPreviewRetainedUntil(this.deps.store, preview.ticketId) !== null;
   }
 
   private requireAutonomousDeployment(ticketId: string, revision: string): void {

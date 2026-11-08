@@ -1,4 +1,4 @@
-import { TERMINAL_CAMPAIGN_STATUSES, campaignDescendants, effectiveSchedule, missingCriterionResult, missingGlobalCriteria } from "../../shared/campaign.ts";
+import { TERMINAL_CAMPAIGN_STATUSES, campaignDescendants, campaignEnvelopeTokens, effectiveSchedule, missingCriterionResult, missingGlobalCriteria } from "../../shared/campaign.ts";
 import type { Campaign, CampaignCard, CampaignCardPlan, CampaignFinalization, CampaignPlan, CampaignRepair, CampaignRuntime } from "../../shared/campaign.ts";
 import type { VcsProvider } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
@@ -388,9 +388,7 @@ export class CampaignEngine {
         continue;
       }
       if (snapshot.state === "merged" && snapshot.baseBranch === campaign.motherBranch) {
-        this.store.campaigns.completeOperation(operation.id, "done", { mergeCommitSha: snapshot.mergeCommitSha, reconciled: true }, this.now());
-        await this.deps.slots.markMerged(ticket.id);
-        this.recordMerged(campaign, card, this.store.getTicket(ticket.id) ?? ticket, snapshot.mergeCommitSha);
+        await this.confirmMerge(campaign, card, ticket, operation.id, { mergeCommitSha: snapshot.mergeCommitSha, reconciled: true });
       } else {
         this.store.campaigns.completeOperation(operation.id, "failed", { reason: "finalization started before the merge", state: snapshot.state }, this.now());
       }
@@ -833,8 +831,7 @@ export class CampaignEngine {
 
   private envelopeRemaining(campaign: Campaign, plan: CampaignPlan): number {
     const used = this.store.campaigns.listCards(campaign.id).reduce((sum, card) => sum + card.tokensUsed, 0);
-    const extra = campaign.runtime.extensions.reduce((sum, extension) => sum + extension.additionalTokens, 0);
-    return plan.budget.totalTokens + extra - plan.budget.finalReserveTokens - used;
+    return campaignEnvelopeTokens(plan, campaign.runtime) - plan.budget.finalReserveTokens - used;
   }
 
   private missingPrerequisites(campaign: Campaign, planCard: CampaignCardPlan): string[] {
@@ -994,7 +991,7 @@ export class CampaignEngine {
         log.warn("previous final preview could not be stopped on reopen", { campaignId, previewId: oldPreview, error: getErrorMessage(error) });
       }
     }
-    const status = reopen ? "running" : campaign.runtime.previousStatus === "finalizing" ? "finalizing" : "running";
+    const status = !reopen && campaign.runtime.previousStatus === "finalizing" ? "finalizing" : "running";
     this.store.campaigns.update(campaignId, {
       status,
       finalTicketId: reopen ? null : campaign.finalTicketId,
@@ -1011,7 +1008,6 @@ export class CampaignEngine {
   /** Cards held only by the budget or the deadline can run again after an explicit extension. */
   private reopenBlockedCards(campaignId: string): void {
     for (const card of this.store.campaigns.listCards(campaignId)) {
-      if (card.state === "suspended" && (card.blockedReason ?? "").startsWith(PAUSED_CARD_PREFIX)) continue;
       if (card.state === "blocked" && (card.blockedReason ?? "").startsWith("Sub-budget exhausted")) {
         this.store.campaigns.updateCard(campaignId, card.cardId, { state: "suspended", blockedReason: `${PAUSED_CARD_PREFIX} resumed with an extension.` }, this.now());
       }

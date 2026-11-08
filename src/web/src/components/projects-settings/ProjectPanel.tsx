@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
 
+import type { FolderListing } from "@shared/folderBrowser";
+
 import type { VcsProvider } from "@shared/constants";
 import { DEFAULT_VCS_PROVIDER, VCS_PROVIDERS, VCS_PROVIDER_LABELS, pickProjectColor } from "@shared/constants";
 import type {
@@ -12,6 +14,7 @@ import type {
 import { vcsProviderSchema } from "@shared/schemas";
 
 import { GithubCloneStep } from "@/components/projects-settings/GithubCloneStep";
+import { FolderBrowser } from "@/components/projects-settings/FolderBrowser";
 import { GithubSetupGuide } from "@/components/projects-settings/GithubSetupGuide";
 import {
   AdvancedSection,
@@ -113,6 +116,7 @@ export function ProjectPanel({
   const [timeoutValue, setTimeoutValue] = useState(String(initialTimeoutMs / timeoutUnitMs(initialUnit)));
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [folderListing, setFolderListing] = useState<FolderListing | null>(null);
   const [step, setStep] = useState<CreateStep>(project === null ? "folder" : "form");
   const [inspection, setInspection] = useState<RepoInspection | null>(null);
   const [inspecting, setInspecting] = useState(false);
@@ -260,8 +264,12 @@ export function ProjectPanel({
     onError(null);
     setPicking(true);
     try {
+      if (!canPickFolder) {
+        setFolderListing(await api.browseFolders(repoPath));
+        return;
+      }
       const picked = await api.pickFolder();
-      if (picked === null) return;
+      if (!picked) return;
       changeRepoPath(picked);
       if (creating) await inspect(picked);
     } catch (e) {
@@ -397,9 +405,22 @@ export function ProjectPanel({
     </Button>
   );
 
+  const folderBrowser = folderListing !== null && (
+    <FolderBrowser
+      initialListing={folderListing}
+      onClose={() => setFolderListing(null)}
+      onChoose={(path) => {
+        setFolderListing(null);
+        changeRepoPath(path);
+        if (creating) void inspect(path);
+      }}
+    />
+  );
+
   if (creating && step === "folder") {
     return (
       <div className="space-y-5 rounded-xl border bg-background p-5 sm:p-6">
+        {folderBrowser}
         <div className="space-y-1">
           <p className="text-xs font-medium text-muted-foreground">Étape 1 sur 2 · Source du projet</p>
           <h4 className="text-lg font-semibold">Ajouter un projet</h4>
@@ -407,7 +428,6 @@ export function ProjectPanel({
         </div>
         <FolderStep
           repoPath={repoPath}
-          canPickFolder={canPickFolder}
           inspecting={inspecting}
           disabled={picking || busy}
           onRepoPathChange={changeRepoPath}
@@ -430,6 +450,7 @@ export function ProjectPanel({
 
   return (
     <div className="space-y-4">
+      {folderBrowser}
       <div className="space-y-2 py-1">
         {creating && <p className="mb-2 text-xs font-medium text-muted-foreground">Étape 2 sur 2 · Confirmer le projet</p>}
         {project !== null && (
@@ -495,7 +516,6 @@ export function ProjectPanel({
         <Field label="Chemin">
           <RepoPathInput
             value={repoPath}
-            canPickFolder={canPickFolder}
             disabled={picking || busy || inspecting}
             readOnly={creating}
             onChange={changeRepoPath}

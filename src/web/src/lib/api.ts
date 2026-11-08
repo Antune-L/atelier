@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+import { folderListingSchema } from "@shared/folderBrowser";
+import type { FolderListing } from "@shared/folderBrowser";
+
 import { autonomousWorkspacesSchema } from "@shared/autonomous";
 import type { AutonomousResumeInput, AutonomousWorkspaces } from "@shared/autonomous";
 
@@ -183,6 +186,8 @@ export const api = {
       throw await responseError(response);
     }
   },
+  browseFolders: async (path: string): Promise<FolderListing> =>
+    folderListingSchema.parse(await request(`/api/folders?path=${encodeURIComponent(path)}`)),
   pickFolder: async (): Promise<string | null> => {
     const response = await fetch("/api/native/pick-folder", {
       method: "POST",

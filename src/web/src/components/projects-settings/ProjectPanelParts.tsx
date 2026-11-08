@@ -53,7 +53,6 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 
 interface RepoPathInputProps {
   value: string;
-  canPickFolder: boolean;
   disabled: boolean;
   readOnly?: boolean;
   onChange: (value: string) => void;
@@ -63,7 +62,6 @@ interface RepoPathInputProps {
 
 export function RepoPathInput({
   value,
-  canPickFolder,
   disabled,
   readOnly = false,
   onChange,
@@ -86,12 +84,10 @@ export function RepoPathInput({
         placeholder="/chemin/vers/le/dépôt"
         aria-label="Chemin du dépôt"
       />
-      {canPickFolder && (
-        <Button variant="outline" onClick={onPick} disabled={disabled} aria-label="Parcourir">
-          <FolderOpen className="h-4 w-4" />
-          Parcourir
-        </Button>
-      )}
+      <Button variant="outline" onClick={onPick} disabled={disabled} aria-label="Parcourir">
+        <FolderOpen className="h-4 w-4" />
+        Parcourir
+      </Button>
     </div>
   );
 }
@@ -105,7 +101,6 @@ const FOLDER_SOURCE_OPTIONS: TabOption<FolderSourceMode>[] = [
 
 interface FolderStepProps {
   repoPath: string;
-  canPickFolder: boolean;
   inspecting: boolean;
   disabled: boolean;
   onRepoPathChange: (value: string) => void;
@@ -120,7 +115,6 @@ interface FolderStepProps {
 
 export function FolderStep({
   repoPath,
-  canPickFolder,
   inspecting,
   disabled,
   onRepoPathChange,
@@ -150,15 +144,12 @@ export function FolderStep({
     <div className="flex flex-col gap-3">
       {modeTabs}
       <p className="text-xs text-muted-foreground">
-        {canPickFolder
-          ? "Choisissez un dossier sur cette machine. Atelier propose ensuite les réglages détectés dans le dépôt."
-          : "Indiquez le chemin du dépôt sur la machine qui héberge Atelier. Ce chemin ne désigne pas un dossier de votre navigateur."}
+        Choisissez un dossier sur la machine qui héberge Atelier. Atelier propose ensuite les réglages détectés dans le dépôt.
       </p>
       <Field label="Chemin">
         <div className="flex w-full items-center gap-2">
           <RepoPathInput
             value={repoPath}
-            canPickFolder={canPickFolder}
             disabled={locked}
             onChange={onRepoPathChange}
             onPick={onPick}

@@ -11,6 +11,7 @@ import type { DesktopUpdateController } from "../shared/desktopUpdate.ts";
 import { providerUpdatesSchema } from "../shared/providerUpdates.ts";
 import { CLAUDE_SDK_VERSION } from "./system/claudeBinary.ts";
 import { CODEX_SDK_VERSION } from "./system/codexBinary.ts";
+import { browseFolders } from "./system/folderBrowser.ts";
 import { ProviderAdoptionService } from "./system/providerAdoption.ts";
 import { ProviderUpdateService, readSourceUpdateTarget } from "./system/providerUpdates.ts";
 import { KeyedMutex } from "./mutex.ts";
@@ -1338,6 +1339,14 @@ export function createApiRoutes(deps: RouteDeps) {
         throw error;
       }
       return new Response(null, { status: HTTP_NO_CONTENT });
+    })
+    .get("/folders", async ({ query, set }) => {
+      set.headers["cache-control"] = "no-store";
+      try {
+        return await browseFolders(query.path ?? "");
+      } catch {
+        return jsonError(set, HTTP_BAD_REQUEST, "Dossier introuvable ou inaccessible sur la machine qui héberge Atelier.");
+      }
     })
     .post("/native/pick-folder", async ({ request, set }) => {
       if (!deps.pickFolder || !isLocalRequest(request)) return jsonError(set, HTTP_NOT_FOUND, "sélecteur de dossier indisponible");

@@ -35,7 +35,7 @@ async function gitOutput(repoPath: string, args: string[], options: OperationDea
 /** Keep the validation subsystem's own error wording, which the board UI translates verbatim. */
 function validationGitError(error: unknown): unknown {
   if (!(error instanceof DetachedWorktreeError)) return error;
-  if (error.step === "remove") return new Error("Validation workspace cleanup timed out.");
+  if (error.step === "remove" && error.result.timedOut) return new Error("Validation workspace cleanup timed out.");
   return new Error(error.result.stderr.trim() || error.result.stdout.trim() || "Validation Git command failed.");
 }
 

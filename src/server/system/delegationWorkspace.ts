@@ -7,6 +7,7 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { z } from "zod";
 
 import { runBoundedCommand, safeJsonParse } from "./boundedCommand.ts";
+import { ATELIER_WORKTREE_LOCK_REASON, removeDetachedWorktree } from "./detachedWorktree.ts";
 import type { AutonomousWorkspace, AutonomousWorkspaceOptions, ImplementationLotOptions, ImplementationRecoveryArchive, ImplementationRecoveryOptions } from "./types.ts";
 
 interface WorktreeIdentity {
@@ -782,7 +783,7 @@ export class DelegationWorkspace {
     const head = (await git(canonicalSlot, ["rev-parse", "HEAD"])).trim();
     const slotInfo = await lstat(canonicalSlot);
     try {
-      await git(canonicalSlot, ["worktree", "add", "--detach", cwd, head]);
+      await git(canonicalSlot, ["worktree", "add", "--lock", "--reason", ATELIER_WORKTREE_LOCK_REASON, "--detach", cwd, head]);
       const parentPaths = await listPaths(canonicalSlot);
       const childPaths = await listPaths(cwd);
       const paths = new Set([...parentPaths, ...childPaths]);
@@ -1085,11 +1086,6 @@ export class DelegationWorkspace {
   }
 
   private async removeWorktree(slotPath: string, cwd: string, repoPath = slotPath): Promise<void> {
-    try {
-      await git(slotPath, ["worktree", "remove", "--force", cwd]);
-    } catch {
-      await rm(cwd, { force: true, recursive: true });
-      await git(repoPath, ["worktree", "prune"]);
-    }
+    await removeDetachedWorktree(repoPath, cwd);
   }
 }

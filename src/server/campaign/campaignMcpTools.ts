@@ -6,9 +6,13 @@ import { TicketOperationError } from "../ticketOperations.ts";
 import { skillFileSchema, skillInstallOutcomeSchema, SKILLZER_PINNED_COMMIT } from "./campaignSkills.ts";
 import {
   approveCampaignInputSchema,
+  cancelCampaignInputSchema,
   checkCampaignReadinessInputSchema,
+  commandResultSchema,
   getCampaignInputSchema,
   installCampaignSkillInputSchema,
+  pauseCampaignInputSchema,
+  resumeCampaignInputSchema,
   submitCampaignPlanInputSchema,
 } from "./campaignService.ts";
 import type { CampaignService } from "./campaignService.ts";
@@ -57,6 +61,8 @@ const getOutputSchema = z.object({
   dryRun: z.boolean(),
 });
 
+const commandOutputSchema = commandResultSchema.extend({ dryRun: z.boolean() });
+
 const listInputSchema = z.object({ project: z.string().optional() });
 const listOutputSchema = z.object({ campaigns: z.array(looseObject), dryRun: z.boolean() });
 
@@ -95,6 +101,27 @@ export const CAMPAIGN_TOOLS = [
     inputSchema: z.toJSONSchema(getCampaignInputSchema, { io: "input" }),
     outputSchema: z.toJSONSchema(getOutputSchema, { io: "output" }),
     annotations: { readOnlyHint: true },
+  },
+  {
+    name: "pause_campaign",
+    description: "Pauses a running or finalizing campaign: no new start or merge; a merge already emitted finishes first, then sessions are stopped. Identities, consumed budgets and criteria are kept. Unavailable during a quota pause.",
+    inputSchema: z.toJSONSchema(pauseCampaignInputSchema, { io: "input" }),
+    outputSchema: z.toJSONSchema(commandOutputSchema, { io: "output" }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "cancel_campaign",
+    description: "Ends a campaign after the user confirmed: sessions stop, merges already in the mother branch, branches and work are kept, and the final report is produced.",
+    inputSchema: z.toJSONSchema(cancelCampaignInputSchema, { io: "input" }),
+    outputSchema: z.toJSONSchema(commandOutputSchema, { io: "output" }),
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+  },
+  {
+    name: "resume_campaign",
+    description: "Resumes a paused campaign progressively, or a reported one. After the deadline, a new deadline and an additional token budget are mandatory.",
+    inputSchema: z.toJSONSchema(resumeCampaignInputSchema, { io: "input" }),
+    outputSchema: z.toJSONSchema(commandOutputSchema, { io: "output" }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
   {
     name: "list_campaigns",
@@ -138,6 +165,15 @@ export async function runCampaignTool(name: string, input: unknown, service: Cam
   }
   if (name === "get_campaign") {
     return { schema: getOutputSchema, value: { ...plain(service.get(parse(getCampaignInputSchema, input))), dryRun } };
+  }
+  if (name === "pause_campaign") {
+    return { schema: commandOutputSchema, value: { ...(await service.pause(parse(pauseCampaignInputSchema, input))), dryRun } };
+  }
+  if (name === "cancel_campaign") {
+    return { schema: commandOutputSchema, value: { ...(await service.cancel(parse(cancelCampaignInputSchema, input))), dryRun } };
+  }
+  if (name === "resume_campaign") {
+    return { schema: commandOutputSchema, value: { ...(await service.resume(parse(resumeCampaignInputSchema, input))), dryRun } };
   }
   if (name === "list_campaigns") {
     const { project } = parse(listInputSchema, input);

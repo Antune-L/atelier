@@ -23,6 +23,7 @@ import type {
   CampaignSkillFingerprint,
   CampaignVersion,
 } from "../../shared/campaign.ts";
+import { getErrorMessage } from "../../shared/errors.ts";
 import type { CampaignStore } from "../db/campaignStore.ts";
 import { TicketOperationError } from "../ticketOperations.ts";
 
@@ -72,6 +73,29 @@ export const installCampaignSkillInputSchema = z.object({
   replaceSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
 });
 
+const commandBaseSchema = z.object({
+  requestId: requestIdSchema,
+  campaignId: campaignIdSchema,
+  version: z.number().int().positive().optional(),
+});
+export const pauseCampaignInputSchema = commandBaseSchema;
+export const cancelCampaignInputSchema = commandBaseSchema;
+export const resumeCampaignInputSchema = commandBaseSchema.extend({
+  extension: z.object({
+    deadlineAt: z.string().datetime({ offset: true }),
+    additionalTokens: z.number().int().positive(),
+  }).optional(),
+});
+
+export interface CampaignLifecycle {
+  requestPause(campaignId: string): Promise<Campaign>;
+  cancel(campaignId: string): Promise<Campaign>;
+  resume(campaignId: string, extension: { deadlineAt: string; additionalTokens: number } | null): Promise<Campaign>;
+}
+
+export const commandResultSchema = z.object({ campaignId: z.string(), status: z.enum(CAMPAIGN_STATUSES), statusReason: z.string().nullable() });
+export type CampaignCommandResult = z.infer<typeof commandResultSchema>;
+
 export const getCampaignInputSchema = z.object({
   campaignId: campaignIdSchema,
   cursor: z.number().int().nonnegative().optional(),
@@ -120,7 +144,45 @@ function assertNotTerminal(campaign: Campaign): void {
 export class CampaignService {
   private readonly inflight = new Map<string, Promise<unknown>>();
 
+  private lifecycle: CampaignLifecycle | null = null;
+
   constructor(private readonly deps: CampaignServiceDeps) {}
+
+  attachLifecycle(lifecycle: CampaignLifecycle): void {
+    this.lifecycle = lifecycle;
+  }
+
+  private requireLifecycle(): CampaignLifecycle {
+    if (this.lifecycle === null) throw new TicketOperationError("CONFLICT", "Campaign execution is not available on this machine.");
+    return this.lifecycle;
+  }
+
+  private async command(name: string, input: z.infer<typeof commandBaseSchema>, run: (campaign: Campaign) => Promise<Campaign>): Promise<CampaignCommandResult> {
+    return this.once(input.requestId, name, commandResultSchema, async () => {
+      const campaign = this.requireCampaign(input.campaignId);
+      assertCurrentVersion(campaign, input.version);
+      let updated: Campaign;
+      try {
+        updated = await run(campaign);
+      } catch (error) {
+        if (error instanceof TicketOperationError) throw error;
+        throw new TicketOperationError("CONFLICT", getErrorMessage(error));
+      }
+      return { campaignId: campaign.id, result: { campaignId: campaign.id, status: updated.status, statusReason: updated.runtime.statusReason } };
+    });
+  }
+
+  pause(input: z.infer<typeof pauseCampaignInputSchema>): Promise<CampaignCommandResult> {
+    return this.command("pause_campaign", input, (campaign) => this.requireLifecycle().requestPause(campaign.id));
+  }
+
+  cancel(input: z.infer<typeof cancelCampaignInputSchema>): Promise<CampaignCommandResult> {
+    return this.command("cancel_campaign", input, (campaign) => this.requireLifecycle().cancel(campaign.id));
+  }
+
+  resume(input: z.infer<typeof resumeCampaignInputSchema>): Promise<CampaignCommandResult> {
+    return this.command("resume_campaign", input, (campaign) => this.requireLifecycle().resume(campaign.id, input.extension ?? null));
+  }
 
   private now(): number {
     return this.deps.now?.() ?? Date.now();

@@ -38,6 +38,7 @@ class FakeSlots implements CampaignSlots {
 
   interruptForCampaign(ticketId: string): Promise<boolean> {
     this.interrupted.push(ticketId);
+    this.store.updateTicket(ticketId, { stage: "interrupted" });
     return Promise.resolve(true);
   }
 
@@ -83,6 +84,7 @@ async function setup(overrides: Parameters<typeof makeCampaignPlan>[0] = {}) {
   const clock = { now: Date.now() };
   const previews = new Map<string, CampaignPreviewState>();
   const stopped: string[] = [];
+  const notifications: { title: string; body: string }[] = [];
   const vcs = new FakeVcs();
   const makeEngine = (service: CampaignService = harness.service) => new CampaignEngine({
     store: harness.store,
@@ -93,9 +95,12 @@ async function setup(overrides: Parameters<typeof makeCampaignPlan>[0] = {}) {
     readyToStart: (campaign) => service.readyToStart(campaign),
     quota: (provider) => Promise.resolve(quota.current === null ? null : { ...okQuota(provider, clock.now), ...quota.current }),
     now: () => clock.now,
+    notify: (title, body) => notifications.push({ title, body }),
     preview: { get: (id) => previews.get(id) ?? null, stop: (id) => { stopped.push(id); return Promise.resolve(); } },
   });
   const engine = makeEngine();
+  engine.start(3_600_000);
+  await engine.tick();
   const ticketOf = (cardId: string): Ticket => {
     const ticketId = harness.store.campaigns.requireCard(campaignId, cardId).ticketId;
     const ticket = ticketId === null ? null : harness.store.getTicket(ticketId);
@@ -111,7 +116,7 @@ async function setup(overrides: Parameters<typeof makeCampaignPlan>[0] = {}) {
   };
   const mother = () => harness.store.campaigns.require(campaignId).motherBranch ?? "";
   const state = (cardId: string) => harness.store.campaigns.requireCard(campaignId, cardId).state;
-  return { ...harness, previews, stopped, quota, clock, campaignId, slots, vcs, engine, makeEngine, ticketOf, deliver, mother, state };
+  return { ...harness, notifications, previews, stopped, quota, clock, campaignId, slots, vcs, engine, makeEngine, ticketOf, deliver, mother, state };
 }
 
 describe("CampaignEngine", () => {
@@ -396,5 +401,128 @@ describe("CampaignEngine finalization", () => {
     const ticket = finalTicket(ctx);
     expect(() => ctx.engine.assertMayStart({ ...ticket, autonomousDelivery: "merge" })).toThrow(/pull request only/);
     expect(ctx.engine.ownsMerge(ticket.id)).toBe(true);
+  });
+});
+
+describe("CampaignEngine report and user commands", () => {
+  const HOUR_MS = 3_600_000;
+
+  test("the verdict priority is unknown, then ready, partial, blocked", async () => {
+    const { campaignVerdict } = await import("./report.ts");
+    const ctx = await setup();
+    await ctx.engine.tick();
+    const campaign = ctx.store.campaigns.require(ctx.campaignId);
+    const plan = ctx.store.campaigns.requireVersion(ctx.campaignId, 1).plan;
+    const cards = ctx.store.campaigns.listCards(ctx.campaignId);
+    const base = { campaign, plan, cards, operations: [], skills: [], activeSessions: 0, finalTokens: 0, now: ctx.clock.now };
+    expect(campaignVerdict(base)).toBe("blocked");
+    const merged = cards.map((card) => ({ ...card, state: "merged" as const }));
+    expect(campaignVerdict({ ...base, cards: merged })).toBe("partial");
+    const finalization = { startedAt: 0, reason: "all_merged" as const, frozenRevision: "r1", targetBranch: "main", prUrl: "https://github.com/o/r/pull/9", prDraft: false, previewUrl: null, previewId: null, previewKeepUntil: null, previewCleanup: null, previewCleanupError: null, criteria: [{ id: "G1", status: "passed" as const, evidence: "shot.png", revision: "r1" }], reserveUsedTokens: 0 };
+    const ready = { ...campaign, runtime: { ...campaign.runtime, finalization } };
+    expect(campaignVerdict({ ...base, campaign: ready, cards: merged })).toBe("ready");
+    expect(campaignVerdict({ ...base, campaign: ready, cards: merged, activeSessions: 1 })).toBe("unknown");
+    const stale = { ...ready, runtime: { ...ready.runtime, finalization: { ...finalization, criteria: [{ ...finalization.criteria[0], id: "G1", status: "passed" as const, evidence: "x", revision: "old" }] } } };
+    expect(campaignVerdict({ ...base, campaign: stale, cards: merged })).toBe("partial");
+  });
+
+  test("the report is produced once at the report time with a single aggregated notification", async () => {
+    const ctx = await setup();
+    await ctx.engine.tick();
+    ctx.deliver("A");
+    await ctx.engine.tick();
+    expect(ctx.notifications).toEqual([]);
+    ctx.clock.now += 6 * HOUR_MS + 1;
+    await ctx.engine.tick();
+    await ctx.engine.tick();
+    expect(ctx.notifications).toEqual([]);
+    ctx.store.updateTicket(ctx.store.campaigns.require(ctx.campaignId).finalTicketId ?? "", { column: "abandoned" });
+    await ctx.engine.tick();
+    ctx.clock.now += HOUR_MS;
+    await ctx.engine.tick();
+    await ctx.engine.tick();
+    const campaign = ctx.store.campaigns.require(ctx.campaignId);
+    expect(campaign.status).toBe("finished");
+    expect(campaign.report?.cards).toMatchObject({ merged: 1, total: 4 });
+    expect(ctx.notifications).toHaveLength(1);
+    expect(ctx.notifications[0]?.title).toContain("Campaign");
+  });
+
+  test("pausing waits for the current pass, stops sessions and keeps identities; resuming restarts progressively", async () => {
+    const ctx = await setup();
+    await ctx.engine.tick();
+    const paused = await ctx.engine.requestPause(ctx.campaignId);
+    expect(paused.status).toBe("paused");
+    expect(["A", "C", "D"].map(ctx.state)).toEqual(["suspended", "suspended", "suspended"]);
+    ctx.deliver("A");
+    await ctx.engine.tick();
+    expect(ctx.vcs.merges).toEqual([]);
+    const resumed = await ctx.engine.resume(ctx.campaignId, null);
+    expect(resumed.status).toBe("running");
+    await ctx.engine.tick();
+    expect(ctx.store.listTickets(true)).toHaveLength(4);
+  });
+
+  test("pause is refused during a quota pause, and resuming after the deadline requires a new deadline and budget", async () => {
+    const ctx = await setup();
+    await ctx.engine.tick();
+    ctx.engine.recordQuotaRefusal(ctx.ticketOf("A").id, { provider: "claude", resetsAt: null, reason: "rejected" });
+    await ctx.engine.tick();
+    expect(ctx.engine.requestPause(ctx.campaignId)).rejects.toThrow(/quota pause/);
+    const fresh = await setup();
+    await fresh.engine.tick();
+    await fresh.engine.requestPause(fresh.campaignId);
+    fresh.clock.now += 7 * HOUR_MS;
+    expect(fresh.engine.resume(fresh.campaignId, null)).rejects.toThrow(/new deadline/);
+    const resumed = await fresh.engine.resume(fresh.campaignId, { deadlineAt: new Date(fresh.clock.now + 2 * HOUR_MS).toISOString(), additionalTokens: 200_000 });
+    expect(resumed.status).toBe("running");
+    expect(resumed.runtime.extensions).toHaveLength(1);
+  });
+
+  test("cancelling keeps merges and branches, stops sessions and produces the report", async () => {
+    const ctx = await setup();
+    await ctx.engine.tick();
+    ctx.deliver("A");
+    await ctx.engine.tick();
+    const cancelled = await ctx.engine.cancel(ctx.campaignId);
+    expect(cancelled.status).toBe("cancelled");
+    expect(ctx.state("A")).toBe("merged");
+    expect(ctx.vcs.branches.has(ctx.mother())).toBe(true);
+    expect(cancelled.report?.verdict).toBe("partial");
+    expect(ctx.notifications).toHaveLength(1);
+  });
+
+  test("service commands are idempotent per request id and refuse a stale version", async () => {
+    const ctx = await setup();
+    ctx.service.attachLifecycle(ctx.engine);
+    await ctx.engine.tick();
+    const first = await ctx.service.pause({ requestId: "p1", campaignId: ctx.campaignId });
+    const replay = await ctx.service.pause({ requestId: "p1", campaignId: ctx.campaignId });
+    expect(replay).toEqual(first);
+    await expect(ctx.service.resume({ requestId: "r9", campaignId: ctx.campaignId, version: 3 })).rejects.toThrow(/current version is 1/);
+  });
+});
+
+describe("CampaignEngine restart reconciliation", () => {
+  test("an unreachable remote during reconciliation puts the campaign in unknown and nothing starts until resume", async () => {
+    const ctx = await setup();
+    await ctx.engine.tick();
+    ctx.deliver("C");
+    ctx.store.campaigns.beginOperation(ctx.campaignId, `merge:${ctx.campaignId}:C:0`, "merge_card", { cardId: "C", prUrl: ctx.ticketOf("C").prUrl });
+    const restarted = ctx.makeEngine();
+    const readPr = ctx.vcs.readPr.bind(ctx.vcs);
+    ctx.vcs.readPr = () => Promise.reject(new Error("gh: network unreachable"));
+    restarted.start(60_000);
+    await restarted.stop();
+    const unknown = ctx.store.campaigns.require(ctx.campaignId);
+    expect(unknown.status).toBe("unknown");
+    expect(unknown.runtime.reconciliationError).toContain("network");
+    const startsBefore = ctx.slots.started.length;
+    await restarted.tick();
+    expect(ctx.slots.started.length).toBe(startsBefore);
+    ctx.vcs.readPr = readPr;
+    const resumed = await restarted.resume(ctx.campaignId, null);
+    expect(resumed.status).toBe("running");
+    expect(resumed.runtime.reconciledAt).not.toBeNull();
   });
 });

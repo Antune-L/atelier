@@ -42,7 +42,7 @@ import type { DoneGateResult, ReviewPublicationState } from "../system/types.ts"
 import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../system/types.ts";
 import { hasStructuredPrDescription } from "../system/vcs/prDescription.ts";
 
-import { requireForkBaseBranch, resolveExecutionBaseBranch, resolvePrTargetBaseBranch } from "./baseBranch.ts";
+import { requireForkBaseBranch, resolveAdoptedWorkBranch, resolveExecutionBaseBranch, resolvePrTargetBaseBranch } from "./baseBranch.ts";
 import { DependencyReconciliation, matchesTicketDelivery } from "./dependencyReconciliation.ts";
 import { createAutonomousSessionGuard } from "./autonomousSessionGuard.ts";
 import { AutonomousPartialDelivery } from "./autonomousPartialDelivery.ts";
@@ -1206,6 +1206,7 @@ export class SlotManager {
     // reviewers grep/read the worktree to verify findings, so it must reflect the PR state, not the
     // base — a fresh branch off base made argus reconstruct the PR via `git show origin/<branch>:...`.
     const reviewRead = ticket.kind === "review" && !ticket.fixComments && ticket.prHeadBranch !== null;
+    const adoptedBranch = resolveAdoptedWorkBranch(ticket, this.store);
     // The repeated null checks are required: TS does not carry the narrowing across `resolving`/`reviewFix`/`cleanFix`.
     let branch = featureBranch(ticket);
     // For an existing-branch checkout (resolving/reviewFix/cleanFix), the origin ref to start from.
@@ -1215,6 +1216,9 @@ export class SlotManager {
     if (qualityCorrection && iteration.headBranch !== null) {
       branch = iteration.headBranch;
       startBranch = iteration.headBranch;
+    } else if (adoptedBranch !== null) {
+      branch = adoptedBranch;
+      startBranch = adoptedBranch;
     } else if (resolving && ticket.branch !== null) {
       branch = ticket.branch;
       startBranch = ticket.branch;
@@ -1282,7 +1286,7 @@ export class SlotManager {
             forkSha = await this.system.readGitRef(project.repoPath, `origin/${baseBranch}`);
           }
         }
-        if (!reuseWorktree && (resolving || reviewFix || cleanFix || qualityCorrection)) {
+        if (!reuseWorktree && (resolving || reviewFix || cleanFix || qualityCorrection || adoptedBranch !== null)) {
           // The PR branch lives only on origin after the slot was released; fetch it, then check it
           // out so the session has the PR's commits. Conflict resolution rebases onto the (also
           // fetched) base; a review-fix or clean applies and pushes fixes onto this same PR head branch.

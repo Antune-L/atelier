@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import type { ProviderQuota } from "../../shared/providerQuota.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import type { Store } from "../db/store.ts";
 import type { DoneGateResult } from "../system/types.ts";
@@ -9,7 +10,7 @@ import { makeCampaignPlan } from "../testing/campaignFixtures.ts";
 import { CampaignEngine } from "./campaignEngine.ts";
 import type { CampaignSlots, CampaignVcs } from "./campaignEngine.ts";
 import type { CampaignService } from "./campaignService.ts";
-import { makeCampaignHarness } from "./campaignTestHarness.ts";
+import { makeCampaignHarness, okQuota } from "./campaignTestHarness.ts";
 
 class FakeSlots implements CampaignSlots {
   readonly started: string[] = [];
@@ -78,6 +79,8 @@ async function setup() {
   const { campaignId } = await harness.service.submitPlan({ requestId: "r1", plan: makeCampaignPlan() });
   await harness.service.approve({ requestId: "a1", campaignId, version: 1 });
   const slots = new FakeSlots(harness.store);
+  const quota: { current: Partial<ProviderQuota> | null } = { current: {} };
+  const clock = { now: Date.now() };
   const vcs = new FakeVcs();
   const makeEngine = (service: CampaignService = harness.service) => new CampaignEngine({
     store: harness.store,
@@ -86,6 +89,8 @@ async function setup() {
     project: () => ({ repoPath: "/tmp/repo", vcsProvider: "github" }),
     skillRoots: harness.skillRoots,
     readyToStart: (campaign) => service.readyToStart(campaign),
+    quota: (provider) => Promise.resolve(quota.current === null ? null : { ...okQuota(provider, clock.now), ...quota.current }),
+    now: () => clock.now,
   });
   const engine = makeEngine();
   const ticketOf = (cardId: string): Ticket => {
@@ -103,7 +108,7 @@ async function setup() {
   };
   const mother = () => harness.store.campaigns.require(campaignId).motherBranch ?? "";
   const state = (cardId: string) => harness.store.campaigns.requireCard(campaignId, cardId).state;
-  return { ...harness, campaignId, slots, vcs, engine, makeEngine, ticketOf, deliver, mother, state };
+  return { ...harness, quota, clock, campaignId, slots, vcs, engine, makeEngine, ticketOf, deliver, mother, state };
 }
 
 describe("CampaignEngine", () => {
@@ -220,5 +225,68 @@ describe("CampaignEngine", () => {
     await ctx.engine.tick();
     expect(ctx.store.campaigns.require(second).status).toBe("queued");
     expect(ctx.store.campaigns.require(second).runtime.statusReason).toContain("Another campaign");
+  });
+});
+
+describe("CampaignEngine quota pause", () => {
+  const HOUR_MS = 3_600_000;
+
+  test("a quota refusal stops starts and sessions, then resumes progressively without duplicates", async () => {
+    const ctx = await setup();
+    await ctx.engine.tick();
+    const startsBefore = ctx.slots.started.length;
+    ctx.engine.recordQuotaRefusal(ctx.ticketOf("A").id, { provider: "claude", resetsAt: ctx.clock.now + HOUR_MS, reason: "Claude rate limit rejected (five_hour)." });
+    await ctx.engine.tick();
+    const paused = ctx.store.campaigns.require(ctx.campaignId);
+    expect(paused.status).toBe("quota_paused");
+    expect(paused.runtime.quotaPause).toMatchObject({ provider: "claude", estimatedResumeAt: ctx.clock.now + HOUR_MS });
+    expect(["A", "C", "D"].map(ctx.state)).toEqual(["suspended", "suspended", "suspended"]);
+    expect(ctx.slots.interrupted).toHaveLength(3);
+
+    ctx.clock.now += 2 * HOUR_MS;
+    await ctx.engine.tick();
+    expect(ctx.store.campaigns.require(ctx.campaignId).status).toBe("running");
+    await ctx.engine.tick();
+    expect(["A", "C", "D"].filter((id) => ctx.state(id) === "running")).toHaveLength(1);
+    await ctx.engine.tick();
+    await ctx.engine.tick();
+    expect(["A", "C", "D"].map(ctx.state)).toEqual(["running", "running", "running"]);
+    expect(ctx.slots.started.length).toBe(startsBefore);
+    expect(ctx.store.listTickets(true)).toHaveLength(4);
+  });
+
+  test("unknown quota or an exhausted budget never resumes automatically", async () => {
+    const ctx = await setup();
+    await ctx.engine.tick();
+    ctx.engine.recordQuotaRefusal(ctx.ticketOf("A").id, { provider: "claude", resetsAt: null, reason: "rejected" });
+    await ctx.engine.tick();
+    ctx.quota.current = null;
+    ctx.clock.now += HOUR_MS;
+    await ctx.engine.tick();
+    expect(ctx.store.campaigns.require(ctx.campaignId).status).toBe("quota_paused");
+    ctx.quota.current = {};
+    ctx.store.campaigns.updateCard(ctx.campaignId, "C", { tokensUsed: 1_000_000 });
+    ctx.store.updateTicket(ctx.ticketOf("C").id, { sessionUsage: { s: { m: { input_tokens: 1_000_000, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } } });
+    ctx.clock.now += HOUR_MS;
+    await ctx.engine.tick();
+    expect(ctx.store.campaigns.require(ctx.campaignId).status).toBe("quota_paused");
+    expect(ctx.store.campaigns.require(ctx.campaignId).runtime.statusReason).toContain("no budget");
+  });
+
+  test("repeated refusals after a resume space out the attempts", async () => {
+    const ctx = await setup();
+    await ctx.engine.tick();
+    const refuse = () => ctx.engine.recordQuotaRefusal(ctx.ticketOf("A").id, { provider: "codex", resetsAt: null, reason: "usage limit" });
+    refuse();
+    await ctx.engine.tick();
+    const first = ctx.store.campaigns.require(ctx.campaignId).runtime.quotaPause;
+    ctx.clock.now = (first?.nextAttemptAt ?? 0) + 1;
+    await ctx.engine.tick();
+    expect(ctx.store.campaigns.require(ctx.campaignId).status).toBe("running");
+    refuse();
+    await ctx.engine.tick();
+    const second = ctx.store.campaigns.require(ctx.campaignId).runtime.quotaPause;
+    expect(second?.attempts).toBe(2);
+    expect((second?.nextAttemptAt ?? 0) - (second?.since ?? 0)).toBeGreaterThan((first?.nextAttemptAt ?? 0) - (first?.since ?? 0));
   });
 });

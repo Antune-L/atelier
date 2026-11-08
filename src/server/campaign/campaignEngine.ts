@@ -5,6 +5,8 @@ import { getErrorMessage } from "../../shared/errors.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import type { Store } from "../db/store.ts";
 import { createLogger } from "../logger.ts";
+import type { ProviderQuota, QuotaProvider } from "../../shared/providerQuota.ts";
+import type { QuotaRefusal } from "../agents/quotaRefusal.ts";
 import type { DoneGateResult } from "../system/types.ts";
 import type { PrSnapshot } from "../system/vcs/types.ts";
 
@@ -12,6 +14,7 @@ import { readCampaignSkills, readSkillInstructions } from "./campaignSkills.ts";
 import type { CampaignSkillRoots } from "./campaignSkills.ts";
 import { campaignCardDescription, campaignCardTicket, parseCampaignDecisions } from "./cardTicket.ts";
 import { consumedTokens, defectFingerprint, isEnvironmentIncident } from "./policies.ts";
+import { quotaAvailability } from "./quotaAvailability.ts";
 
 const log = createLogger("campaign");
 
@@ -22,6 +25,10 @@ const SETTLED_CARD_STATES: readonly CampaignCard["state"][] = ["merged", "blocke
 const MERGE_CONFLICT_FINGERPRINT = "merge-conflict";
 const INCIDENT_PREFIX = "incident:";
 const CONFLICT_WAITING_SLOT = "Merge conflict: waiting for a free slot to resolve it.";
+const PAUSED_CARD_PREFIX = "Paused:";
+const QUOTA_BACKOFF_BASE_MS = 5 * 60_000;
+const QUOTA_BACKOFF_MAX_MS = 2 * 60 * 60_000;
+const QUOTA_REFUSAL_RESET_MS = 60 * 60_000;
 
 export const CAMPAIGN_ENGINE_EVENT = {
   started: "started",
@@ -35,6 +42,9 @@ export const CAMPAIGN_ENGINE_EVENT = {
   incident: "incident",
   decision: "decision",
   budgetExhausted: "budget_exhausted",
+  quotaPaused: "quota_paused",
+  quotaResumed: "quota_resumed",
+  cardResumed: "card_resumed",
   error: "engine_error",
 } as const;
 
@@ -67,6 +77,8 @@ export interface CampaignEngineDeps {
   skillRoots: CampaignSkillRoots;
   /** Re-runs the readiness check when an approved campaign is about to start (FR2). */
   readyToStart(campaign: Campaign): Promise<{ ready: boolean; reason: string | null }>;
+  /** Observed provider quota; unknown or stale counts as unavailable (FR9). */
+  quota(provider: QuotaProvider): Promise<ProviderQuota | null>;
   now?(): number;
   onChange?(campaignId: string): void;
 }
@@ -151,6 +163,11 @@ export class CampaignEngine {
     this.deps.onChange?.(campaignId);
   }
 
+  private campaignOfTicket(ticketId: string): Campaign | null {
+    const card = this.store.campaigns.getCardByTicket(ticketId);
+    return card === null ? this.store.campaigns.findByFinalTicket(ticketId) : this.store.campaigns.get(card.campaignId);
+  }
+
   private approvedPlan(campaign: Campaign): CampaignPlan {
     if (campaign.approvedVersion === null) throw new Error(`campaign ${campaign.id} has no approved version`);
     return this.store.campaigns.requireVersion(campaign.id, campaign.approvedVersion).plan;
@@ -186,6 +203,10 @@ export class CampaignEngine {
 
   private async advance(campaignId: string): Promise<void> {
     const campaign = this.store.campaigns.require(campaignId);
+    if (campaign.status === "quota_paused") {
+      await this.advanceQuotaPause(campaign);
+      return;
+    }
     if (campaign.status !== "running") return;
     const plan = this.approvedPlan(campaign);
     const project = this.deps.project(campaign.project);
@@ -195,7 +216,83 @@ export class CampaignEngine {
     await this.repairCards(campaign);
     await this.mergeCards(campaign, project, mother);
     await this.enforceBudgets(campaign, plan);
+    if (await this.resumeOnePausedCard(campaign)) return;
     await this.startReadyCards(campaign, plan);
+  }
+
+  /** Stop a running card's sessions while keeping its worktree, branch and identity. */
+  private async suspendCard(campaign: Campaign, card: CampaignCard, reason: string): Promise<void> {
+    if (card.ticketId !== null) await this.deps.slots.interruptForCampaign(card.ticketId, reason);
+    this.store.campaigns.updateCard(campaign.id, card.cardId, { state: "suspended", blockedReason: `${PAUSED_CARD_PREFIX} ${reason}` }, this.now());
+  }
+
+  private async suspendRunningCards(campaignId: string, reason: string): Promise<void> {
+    const campaign = this.store.campaigns.require(campaignId);
+    const running = this.store.campaigns.listCards(campaignId).filter((card) => card.state === "running");
+    for (const card of running) await this.suspendCard(campaign, card, reason);
+  }
+
+  /** Progressive resumption: one paused card per pass, before any new start. */
+  private async resumeOnePausedCard(campaign: Campaign): Promise<boolean> {
+    const card = this.store.campaigns.listCards(campaign.id).find((entry) => entry.state === "suspended" && (entry.blockedReason ?? "").startsWith(PAUSED_CARD_PREFIX));
+    if (!card || card.ticketId === null) return false;
+    if (this.store.campaigns.require(campaign.id).status !== "running") return true;
+    this.store.campaigns.updateCard(campaign.id, card.cardId, { state: "running", blockedReason: null }, this.now());
+    try {
+      await this.deps.slots.retry(card.ticketId);
+      this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.cardResumed, { cardId: card.cardId });
+    } catch (error) {
+      this.block(campaign, this.approvedPlan(campaign), card.cardId, `Resume failed: ${getErrorMessage(error)}`);
+    }
+    return true;
+  }
+
+  /** A provider refused for quota: save state, stop starts and sessions, and show the provider and estimated resume time (FR9). */
+  recordQuotaRefusal(ticketId: string, refusal: QuotaRefusal): void {
+    const campaign = this.campaignOfTicket(ticketId);
+    if (campaign === null || (campaign.status !== "running" && campaign.status !== "finalizing")) return;
+    const now = this.now();
+    const recent = campaign.runtime.lastQuotaResumeAt !== null && now - campaign.runtime.lastQuotaResumeAt < QUOTA_REFUSAL_RESET_MS;
+    const attempts = recent ? campaign.runtime.quotaRefusals + 1 : 1;
+    const backoff = Math.min(QUOTA_BACKOFF_BASE_MS * 2 ** (attempts - 1), QUOTA_BACKOFF_MAX_MS);
+    this.store.campaigns.update(campaign.id, {
+      status: "quota_paused",
+      runtime: {
+        ...campaign.runtime,
+        previousStatus: campaign.status,
+        quotaRefusals: attempts,
+        quotaPause: { provider: refusal.provider, since: now, estimatedResumeAt: refusal.resetsAt, attempts, nextAttemptAt: Math.max(now + backoff, refusal.resetsAt ?? 0) },
+        statusReason: refusal.reason,
+      },
+    }, now);
+    this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.quotaPaused, { provider: refusal.provider, estimatedResumeAt: refusal.resetsAt, attempts, ticketId });
+    this.wake();
+  }
+
+  private async advanceQuotaPause(campaign: Campaign): Promise<void> {
+    const pause = campaign.runtime.quotaPause;
+    if (pause === null) return;
+    if (this.store.campaigns.listCards(campaign.id).some((card) => card.state === "running")) {
+      await this.suspendRunningCards(campaign.id, `quota exhausted on ${pause.provider}.`);
+      return;
+    }
+    const plan = this.approvedPlan(campaign);
+    const now = this.now();
+    if (!plan.quotaPolicy.autoResume) return this.noteWaiting(campaign, "Quota exhausted; the plan does not allow an automatic resume.");
+    if (now >= Date.parse(plan.schedule.deadlineAt)) return this.noteWaiting(campaign, "Quota exhausted until after the deadline; no automatic resume.");
+    if (this.envelopeRemaining(campaign, plan) <= 0) return this.noteWaiting(campaign, "Quota exhausted and no budget remains; no automatic resume.");
+    if (pause.nextAttemptAt !== null && now < pause.nextAttemptAt) return;
+    const availability = quotaAvailability(await this.deps.quota(pause.provider), now);
+    if (!availability.available) {
+      this.updateRuntime(campaign.id, (runtime) => ({ ...runtime, quotaPause: runtime.quotaPause === null ? null : { ...runtime.quotaPause, estimatedResumeAt: availability.resetsAt ?? runtime.quotaPause.estimatedResumeAt, nextAttemptAt: now + QUOTA_BACKOFF_BASE_MS }, statusReason: availability.reason }));
+      return;
+    }
+    const resumeTo = campaign.runtime.previousStatus === "finalizing" ? "finalizing" : "running";
+    this.store.campaigns.update(campaign.id, {
+      status: resumeTo,
+      runtime: { ...campaign.runtime, quotaPause: null, previousStatus: null, statusReason: null, lastQuotaResumeAt: now, quotaPausedMs: campaign.runtime.quotaPausedMs + (now - pause.since) },
+    }, now);
+    this.event(campaign.id, CAMPAIGN_ENGINE_EVENT.quotaResumed, { provider: pause.provider, pausedMs: now - pause.since });
   }
 
   private async ensureMotherBranch(campaign: Campaign, project: CampaignProject): Promise<string> {
@@ -301,6 +398,7 @@ export class CampaignEngine {
     const plan = this.approvedPlan(campaign);
     for (const card of this.store.campaigns.listCards(campaign.id)) {
       if (card.ticketId === null || card.state !== "running") continue;
+      if (this.store.campaigns.require(campaign.id).status !== "running") return;
       const ticket = this.store.getTicket(card.ticketId);
       if (!ticket) continue;
       const failed = ticket.column === "failed" || ticket.stage === "stalled" || (ticket.stage === "interrupted" && ticket.slotId !== null);
@@ -320,6 +418,10 @@ export class CampaignEngine {
         await this.deps.slots.retry(ticket.id);
       } catch (error) {
         this.block(campaign, plan, card.cardId, `Repair could not start: ${getErrorMessage(error)}`);
+        continue;
+      }
+      if (this.store.getTicket(ticket.id)?.column !== "implementing") {
+        this.store.campaigns.updateCard(campaign.id, card.cardId, { repairs: card.repairs }, this.now());
       }
     }
   }
@@ -467,9 +569,12 @@ export class CampaignEngine {
 
   /** Card notifications are withheld while their campaign executes; the final report is the only one (FR11). */
   silences(ticketId: string): boolean {
-    const card = this.store.campaigns.getCardByTicket(ticketId);
-    const campaign = card === null ? this.store.campaigns.findByFinalTicket(ticketId) : this.store.campaigns.get(card.campaignId);
-    return campaign !== null && !TERMINAL_CAMPAIGN_STATUSES.includes(campaign.status);
+    try {
+      const campaign = this.campaignOfTicket(ticketId);
+      return campaign !== null && !TERMINAL_CAMPAIGN_STATUSES.includes(campaign.status);
+    } catch {
+      return false;
+    }
   }
 
   ownsMerge(ticketId: string): boolean {

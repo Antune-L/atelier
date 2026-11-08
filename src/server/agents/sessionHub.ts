@@ -17,6 +17,9 @@ import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
 import type { ChannelEvent, WorkerToolName } from "../../shared/protocol.ts";
 import type { ExecutionOwnerType } from "../../shared/schemas.ts";
 import type { TranscriptUpdate } from "../../shared/transcript.ts";
+import type { QuotaProvider } from "../../shared/providerQuota.ts";
+import { detectQuotaRefusal } from "./quotaRefusal.ts";
+import type { QuotaRefusal } from "./quotaRefusal.ts";
 import { TranscriptBuffer } from "./transcriptBuffer.ts";
 import { createLogger } from "../logger.ts";
 import type {
@@ -337,11 +340,27 @@ export class SessionHub {
 
   /** Receives every Claude rate-limit event carrying a window type and utilization (quota page). */
   private rateLimitListener: ((event: RateLimitSessionEvent, receivedAt: number) => void) | null = null;
+  private quotaRefusalListener: ((ticketId: string, refusal: QuotaRefusal) => void) | null = null;
 
   constructor(private readonly system: SystemAdapter, private readonly closeTimeoutMs = SESSION_CLOSE_TIMEOUT_MS) {}
 
   setRateLimitListener(listener: ((event: RateLimitSessionEvent, receivedAt: number) => void) | null): void {
     this.rateLimitListener = listener;
+  }
+
+  /** Receives quota refusals from any session or child lot, keyed by the owning ticket. */
+  setQuotaRefusalListener(listener: ((ticketId: string, refusal: QuotaRefusal) => void) | null): void {
+    this.quotaRefusalListener = listener;
+  }
+
+  private notifyQuotaRefusal(ticketId: string, event: AgentSessionEvent, provider: QuotaProvider | null): void {
+    const refusal = detectQuotaRefusal(event, provider);
+    if (refusal === null) return;
+    try {
+      this.quotaRefusalListener?.(ticketId, refusal);
+    } catch (error) {
+      log.warn("écouteur de refus de quota en échec", { reason: getErrorMessage(error) });
+    }
   }
 
   private notifyRateLimit(event: AgentSessionEvent): void {
@@ -633,6 +652,7 @@ export class SessionHub {
   private handleEvent(live: LiveSession, event: AgentSessionEvent): void {
     const ticketId = live.config.ticketId;
     const current = this.sessions.get(ticketId) === live;
+    this.notifyQuotaRefusal(ticketId, event, live.config.provider);
     if (event.type === "init") {
       live.sessionId = event.sessionId;
       live.configuredServiceTier = event.configuredServiceTier ?? null;
@@ -778,6 +798,7 @@ export class SessionHub {
     const sourcePrefix = label ? `⟨${label}⟩ ` : event.sourceId ? `⟨agent ${event.sourceId}⟩ ` : "";
     const blockSource = event.sourceId ? `${sourceId}:${event.sourceId}` : sourceId;
     this.notifyRateLimit(event);
+    this.notifyQuotaRefusal(id, event, null);
     if ((event.type === "assistant_text" || event.type === "thinking" || event.type === "progress") && event.stream) {
       const text = event.type === "progress" ? event.message : event.text;
       const marker = event.type === "thinking" ? "💭 " : event.type === "progress" ? "… " : "";

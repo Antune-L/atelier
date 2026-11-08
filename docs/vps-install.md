@@ -148,6 +148,30 @@ sudo -u kanban ln -sfn /var/lib/kanban/.codex/skills /var/lib/kanban/.claude/ski
 sudo -u kanban -H git clone https://github.com/Antune-L/atelier.git /var/lib/kanban/projects/atelier
 ```
 
+### Admitting an existing shared repository
+
+Use this procedure when Atelier and another local tool must work in the same existing checkout. It preserves the checkout's path and owner: do not move it, clone it into Atelier's project directory, or point Atelier at its production data directory. The example below is the Orchestrateur checkout at `/home/ubuntu/orchestrateur`; repeat the access preparation for each additional repository.
+
+**Deploy the worktree lifecycle fix first.** The fix locks each worktree Atelier owns and removes only its exact registered paths; it does not prune registrations belonging to other tools. Install and deploy the reviewed commit containing that change before registering a shared repository. The commit can be from a reviewed remote branch; it does not need to be merged into `main`. An upgrade to an older release can restore the unsafe cleanup behavior. Use the reviewed-commit procedure in A3 and `sudo kanban-upgrade --sha <full-40-character-commit-sha>`; do not use `--force`. The upgrade refuses active work and restarts the service after switching releases. Confirm the idle check first with `sudo kanban-upgrade --check-idle` (exit `0` means idle; `75` means work is active). The fixture qualification covered arbitrary hidden foreign worktrees and six Atelier worktree families; it does not replace inspection of the service namespace or provider checks below.
+
+**Expose only the approved checkout to the service.** Keep the service running as `kanban` with `ProtectSystem=strict`. Create a root-owned, mode `0644`, machine-specific drop-in at `/etc/systemd/system/kanban.service.d/repository-orchestrateur.conf` with this complete content:
+
+```ini
+[Service]
+ProtectHome=tmpfs
+BindPaths=/home/ubuntu/orchestrateur:/home/ubuntu/orchestrateur
+```
+
+This is local administrator configuration, not a release artifact or executable helper. For each additional checkout, create a separately named drop-in and add its same-path `BindPaths` entry; keep `ProtectHome=tmpfs` and the service identity unchanged. This exposes only approved checkouts without mounting each temporary worktree. Confirm the service is idle before `sudo systemctl daemon-reload`, then restart it with `sudo systemctl restart kanban`. Inspect `sudo systemctl status kanban --no-pager`, `sudo journalctl -u kanban -n 50 --no-pager`, and the effective service namespace before registering the project. The later `kanban-upgrade --sha` procedure also restarts the service, so do not restart a second time after that upgrade. Do not add broad `ReadWritePaths` for `/home` or disable the existing systemd protections.
+
+**Grant narrow, inherited Git administration access.** The `acl` package is required for `setfacl`; confirm it is available before this step. Back up the checkout's current ACLs and Git configuration first, and retain those backups for recovery. Apply the tested access policy to the shared `.git` directory and its descendants: named `rwX` ACLs for `ubuntu` and `kanban`, default ACLs on directories for both users, and a default ACL mask of `rwx`. Configure `core.sharedRepository=0660` in that repository. This lets both tools maintain Git's shared administration metadata while preserving the checkout owner's existing ownership. The checkout contents need only read and traversal access for `kanban`; do not grant recursive checkout write access. Do not change ownership recursively, copy personal Git credentials, or grant `ubuntu` access to Atelier's slots or temporary directories. Verify the effective ACL inheritance with new files and directories created by each account before registration. The ACL fixture qualified this policy, but a mode explicitly created as private can still require investigation rather than a broader grant.
+
+Configure Git trust only for the exact approved checkout path if Git reports that it is not trusted. Do not use a wildcard `safe.directory` entry or import the other user's global Git configuration. No such trust error was observed in the qualification fixture, so do not add an exception preemptively.
+
+**Register only after access and lifecycle qualification.** In the board, choose **Dossier local**, enter `/home/ubuntu/orchestrateur` exactly, inspect it, then add that existing folder. Do not choose **Depuis GitHub**, which creates or reuses a clone under the clone root. Registering a project affects backend startup recovery and worktree cleanup, so registration must follow the deployed lifecycle fix, ACL inheritance checks, and service-namespace inspection. Verify both Claude and Codex can inspect the repository and run the intended worktree operations; then verify restart and recovery with no active work. Do not test cleanup against a real foreign worktree.
+
+**Future additions and removal.** Repeat the path-specific systemd and `.git` ACL preparation for each approved existing checkout, inspect the service view, and then register its original path through **Dossier local**. Do not expose all of `/home` or add a per-worktree mount. To revoke access, first wait for Atelier and the other tool to become idle and reconcile their worktrees; preserve any work that must be kept, then remove that project's drop-in and restore the saved ACL and Git configuration state. Do not indiscriminately remove ACL entries that may belong to another administrator or tool. Removing a project from the board alone does not revoke filesystem access, and revocation must not delete the repository.
+
 **Additional GitHub accounts (optional).** The login above is the machine's default account. To work on projects of other GitHub accounts without switching it, see [GitHub accounts and cloned projects](#github-accounts-and-cloned-projects).
 
 ### A5. Start the service

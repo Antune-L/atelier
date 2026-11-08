@@ -39,7 +39,7 @@ import { verifyPreviewCleanup } from "./previewCleanup.ts";
 import type { PreviewRecord } from "../../shared/preview.ts";
 import { computeCodeFingerprint, computeCodeSnapshot } from "./codeFingerprint.ts";
 import { DelegationWorkspace } from "./delegationWorkspace.ts";
-import { addDetachedWorktree, removeDetachedWorktree } from "./detachedWorktree.ts";
+import { addDetachedWorktree, ATELIER_WORKTREE_LOCK_REASON, removeDetachedWorktree, removeRegisteredWorktreesUnderRoot } from "./detachedWorktree.ts";
 import { probeCodexRuntime } from "./codexRuntime.ts";
 import { readCodexQuota } from "./codexQuota.ts";
 import { readClaudeUsageLive } from "./claudeQuota.ts";
@@ -391,12 +391,7 @@ export class RealSystemAdapter implements SystemAdapter {
 
   async worktreeRemove(repoPath: string, slotPath: string): Promise<void> {
     await this.delegationWorkspace.cleanupForSlot(slotPath, repoPath);
-    // Full reset, best-effort: a stuck/half-built worktree can lose its `.git`
-    // link (so `remove` fails) or leave a stale registration. `prune` clears the
-    // dangling entry and `rm -rf` guarantees the path is empty and re-addable.
-    await $`git -C ${repoPath} worktree remove ${slotPath} --force`.nothrow().quiet();
-    await $`git -C ${repoPath} worktree prune`.nothrow().quiet();
-    await $`rm -rf ${slotPath}`.nothrow().quiet();
+    await removeDetachedWorktree(repoPath, slotPath);
   }
 
   async prepareImplementationLot(opts: ImplementationLotOptions): Promise<{ cwd: string; integrated?: boolean }> {
@@ -538,8 +533,17 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async clearAnalysisWorkspaces(root: string, repoPaths: string[]): Promise<void> {
+    let hasCleanupFailure = false;
+    for (const repoPath of new Set(repoPaths)) {
+      try {
+        await removeRegisteredWorktreesUnderRoot(repoPath, root);
+      } catch (error) {
+        hasCleanupFailure = true;
+        log.warn("nettoyage des analyses incomplet ; racine conservée", { repoPath, root, error: getErrorMessage(error) });
+      }
+    }
+    if (hasCleanupFailure) return;
     await rm(root, { recursive: true, force: true });
-    for (const repoPath of repoPaths) await $`git -C ${repoPath} worktree prune`.nothrow().quiet();
   }
 
   async collectAuditRange(input: AuditRangeInput): Promise<AuditRange> {
@@ -585,8 +589,8 @@ export class RealSystemAdapter implements SystemAdapter {
 
     const res =
       branchCheck.exitCode === 0
-        ? await $`git -C ${opts.repoPath} worktree add ${opts.slotPath} ${opts.branch}`.nothrow().quiet()
-        : await $`git -C ${opts.repoPath} worktree add ${opts.slotPath} -b ${opts.branch} origin/${opts.baseBranch}`
+        ? await $`git -C ${opts.repoPath} worktree add --lock --reason ${ATELIER_WORKTREE_LOCK_REASON} ${opts.slotPath} ${opts.branch}`.nothrow().quiet()
+        : await $`git -C ${opts.repoPath} worktree add --lock --reason ${ATELIER_WORKTREE_LOCK_REASON} ${opts.slotPath} -b ${opts.branch} origin/${opts.baseBranch}`
             .nothrow()
             .quiet();
     if (res.exitCode !== 0) {
@@ -600,7 +604,7 @@ export class RealSystemAdapter implements SystemAdapter {
     // `-B` (re)creates the local branch at origin/<startBranch>, so the worktree carries the PR's commits
     // rather than a fresh branch off base. `localBranch` may differ from `startBranch` (clean ticket).
     // Caller fetches origin/<startBranch> first.
-    const res = await $`git -C ${repoPath} worktree add ${slotPath} -B ${localBranch} origin/${startBranch}`.nothrow().quiet();
+    const res = await $`git -C ${repoPath} worktree add --lock --reason ${ATELIER_WORKTREE_LOCK_REASON} ${slotPath} -B ${localBranch} origin/${startBranch}`.nothrow().quiet();
     if (res.exitCode !== 0) {
       const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
       throw new Error(`git worktree add (branche existante) a échoué (code ${res.exitCode}) : ${detail}`);

@@ -29,16 +29,20 @@ import type {
   CampaignStatus,
   CampaignVersion,
 } from "../../shared/campaign.ts";
+import { safeJsonParse } from "../system/boundedCommand.ts";
 
 const CAMPAIGN_ID_LENGTH = 10;
 
+type ColumnValue = string | number | null;
+
 function parseJson(raw: string | null): unknown {
-  if (raw === null) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+  return raw === null ? null : safeJsonParse(raw);
+}
+
+function setClause(columns: Record<string, ColumnValue | undefined>, now: number): { sql: string; values: ColumnValue[] } {
+  const assigned: Record<string, ColumnValue | undefined> = { ...columns, updated_at: now };
+  const entries = Object.entries(assigned).filter((entry): entry is [string, ColumnValue] => entry[1] !== undefined);
+  return { sql: entries.map(([column]) => `${column} = ?`).join(", "), values: entries.map(([, value]) => value) };
 }
 
 const campaignRowSchema = z.object({
@@ -247,22 +251,20 @@ export class CampaignStore {
   }
 
   update(id: string, patch: CampaignPatch, now = Date.now()): Campaign {
-    const fields: string[] = [];
-    const values: (string | number | null)[] = [];
-    const set = (column: string, value: string | number | null): void => {
-      fields.push(`${column} = ?`);
-      values.push(value);
-    };
-    if (patch.status !== undefined) set("status", patch.status);
-    if (patch.approvedVersion !== undefined) set("approved_version", patch.approvedVersion);
-    if (patch.approvedAt !== undefined) set("approved_at", patch.approvedAt);
-    if (patch.motherBranch !== undefined) set("mother_branch", patch.motherBranch);
-    if (patch.baseBranch !== undefined) set("base_branch", patch.baseBranch);
-    if (patch.finalTicketId !== undefined) set("final_ticket_id", patch.finalTicketId);
-    if (patch.runtime !== undefined) set("runtime_json", JSON.stringify(campaignRuntimeSchema.parse(patch.runtime)));
-    if (patch.report !== undefined) set("report_json", patch.report === null ? null : JSON.stringify(campaignReportSchema.parse(patch.report)));
-    set("updated_at", now);
-    this.db.query(`UPDATE campaigns SET ${fields.join(", ")} WHERE id = ?`).run(...values, id);
+    const runtimeJson = patch.runtime === undefined ? undefined : JSON.stringify(campaignRuntimeSchema.parse(patch.runtime));
+    let reportJson: string | null | undefined = undefined;
+    if (patch.report !== undefined) reportJson = patch.report === null ? null : JSON.stringify(campaignReportSchema.parse(patch.report));
+    const { sql, values } = setClause({
+      status: patch.status,
+      approved_version: patch.approvedVersion,
+      approved_at: patch.approvedAt,
+      mother_branch: patch.motherBranch,
+      base_branch: patch.baseBranch,
+      final_ticket_id: patch.finalTicketId,
+      runtime_json: runtimeJson,
+      report_json: reportJson,
+    }, now);
+    this.db.query(`UPDATE campaigns SET ${sql} WHERE id = ?`).run(...values, id);
     return this.require(id);
   }
 
@@ -331,22 +333,17 @@ export class CampaignStore {
   }
 
   updateCard(campaignId: string, cardId: string, patch: CampaignCardPatch, now = Date.now()): CampaignCard {
-    const fields: string[] = [];
-    const values: (string | number | null)[] = [];
-    const set = (column: string, value: string | number | null): void => {
-      fields.push(`${column} = ?`);
-      values.push(value);
-    };
-    if (patch.ticketId !== undefined) set("ticket_id", patch.ticketId);
-    if (patch.state !== undefined) set("state", patch.state);
-    if (patch.planVersion !== undefined) set("plan_version", patch.planVersion);
-    if (patch.prUrl !== undefined) set("pr_url", patch.prUrl);
-    if (patch.mergeSha !== undefined) set("merge_sha", patch.mergeSha);
-    if (patch.tokensUsed !== undefined) set("tokens_used", patch.tokensUsed);
-    if (patch.repairs !== undefined) set("repairs_json", JSON.stringify(patch.repairs));
-    if (patch.blockedReason !== undefined) set("blocked_reason", patch.blockedReason);
-    set("updated_at", now);
-    this.db.query(`UPDATE campaign_cards SET ${fields.join(", ")} WHERE campaign_id = ? AND card_id = ?`).run(...values, campaignId, cardId);
+    const { sql, values } = setClause({
+      ticket_id: patch.ticketId,
+      state: patch.state,
+      plan_version: patch.planVersion,
+      pr_url: patch.prUrl,
+      merge_sha: patch.mergeSha,
+      tokens_used: patch.tokensUsed,
+      repairs_json: patch.repairs === undefined ? undefined : JSON.stringify(patch.repairs),
+      blocked_reason: patch.blockedReason,
+    }, now);
+    this.db.query(`UPDATE campaign_cards SET ${sql} WHERE campaign_id = ? AND card_id = ?`).run(...values, campaignId, cardId);
     return this.requireCard(campaignId, cardId);
   }
 

@@ -11,6 +11,8 @@ import { z } from "zod";
 import { createMcpSettingsController } from "../../desktop/mcpSettings.ts";
 import { openPrSchema, ticketSchema, wsClientEventSchema } from "../shared/schemas.ts";
 
+import { CAMPAIGN_TOOL_NAMES } from "./campaign/campaignMcpTools.ts";
+import { makeCampaignPlan } from "./testing/campaignFixtures.ts";
 import { startServer } from "./index.ts";
 import type { RunningServer } from "./index.ts";
 
@@ -277,7 +279,7 @@ test("an official MCP client lists, creates idempotently, starts, and updates RE
   if (client === null) throw new Error("client MCP non initialisé");
 
   const tools = await client.listTools();
-  expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+  const ticketTools = [
     "analyze_tickets",
     "answer_question",
     "create_review_ticket",
@@ -289,7 +291,10 @@ test("an official MCP client lists, creates idempotently, starts, and updates RE
     "list_tickets",
     "start_ticket",
     "update_ticket",
-  ]);
+  ];
+  const names = tools.tools.map((tool) => tool.name);
+  expect(names.slice(0, ticketTools.length).sort()).toEqual(ticketTools);
+  expect(names.slice(ticketTools.length).sort()).toEqual([...CAMPAIGN_TOOL_NAMES].sort());
 
   const updateTool = tools.tools.find((tool) => tool.name === "update_ticket");
   const updateInputSchema = z.object({
@@ -1092,6 +1097,33 @@ test("list_open_prs and create_review_ticket start one review card that list_tic
   const unknownProject = await client.callTool({ name: "list_open_prs", arguments: { project: "unknown-project" } });
   expect(unknownProject.isError).toBe(true);
   expect(errorResultSchema.parse(textContent(unknownProject)).error.code).toBe("INVALID_INPUT");
+});
+
+test("an MCP client submits, checks and approves a campaign idempotently, then reads it with a cursor", async () => {
+  if (client === null) throw new Error("client MCP non initialisé");
+  const plan = makeCampaignPlan({ project: PROJECT_KEY });
+  const submitted = z.object({ campaignId: z.string(), version: z.number() }).parse(structuredContent(await client.callTool({ name: "submit_campaign_plan", arguments: { requestId: "campaign-e2e-1", plan } })));
+  expect(submitted.version).toBe(1);
+  const replayed = z.object({ campaignId: z.string() }).parse(structuredContent(await client.callTool({ name: "submit_campaign_plan", arguments: { requestId: "campaign-e2e-1", plan } })));
+  expect(replayed.campaignId).toBe(submitted.campaignId);
+
+  const cyclic = { ...plan, cards: plan.cards.map((card) => (card.id === "A" ? { ...card, dependsOn: ["B"] } : card)) };
+  const refused = errorResultSchema.parse(textContent(await client.callTool({ name: "submit_campaign_plan", arguments: { requestId: "campaign-e2e-2", plan: cyclic } })));
+  expect(refused.error.code).toBe("INVALID_INPUT");
+  expect(refused.error.message).toContain("cycle");
+
+  const readiness = z.object({ readiness: z.object({ items: z.array(z.object({ id: z.string(), status: z.string() })) }) })
+    .parse(structuredContent(await client.callTool({ name: "check_campaign_readiness", arguments: { campaignId: submitted.campaignId } })));
+  expect(readiness.readiness.items.map((item) => item.id)).toContain("skill:simplifier");
+
+  const stale = errorResultSchema.parse(textContent(await client.callTool({ name: "approve_campaign", arguments: { requestId: "campaign-e2e-approve-0", campaignId: submitted.campaignId, version: 2 } })));
+  expect(stale.error.message).toContain("current version is 1");
+
+  const first = await client.callTool({ name: "get_campaign", arguments: { campaignId: submitted.campaignId } });
+  const snapshot = z.object({ cursor: z.number(), campaign: z.object({ status: z.string() }) }).parse(structuredContent(first));
+  expect(snapshot.campaign.status).toBe("planning");
+  const next = z.object({ events: z.array(z.unknown()) }).parse(structuredContent(await client.callTool({ name: "get_campaign", arguments: { campaignId: submitted.campaignId, cursor: snapshot.cursor } })));
+  expect(next.events).toEqual([]);
 });
 
 test("the public MCP endpoint rejects invalid access and stays absent when disabled", async () => {

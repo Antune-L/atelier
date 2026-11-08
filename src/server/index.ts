@@ -20,6 +20,7 @@ import { getErrorMessage } from "../shared/errors.ts";
 import { terminalViewportSchema } from "../shared/schemas.ts";
 
 import { AtelierManager } from "./agents/atelierManager.ts";
+import { buildCampaignService } from "./campaign/wiring.ts";
 import { AutonomousWorkflow } from "./agents/autonomousWorkflow.ts";
 import { createAutonomousSessionGuard } from "./agents/autonomousSessionGuard.ts";
 import { AgentCoordinator } from "./agents/coordinator.ts";
@@ -428,6 +429,13 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     if (preview && preview.cleanupStatus !== "complete") await previewManager.stop(preview.id);
     await qualityManager.cancel(ticketId);
   });
+  const campaignService = buildCampaignService({
+    store,
+    dryRun: system.dryRun,
+    dataRoot,
+    previewReadiness: (project, branch) => previewManager.readiness(project, branch),
+    quota: (provider) => quotaService.read(provider),
+  });
   const configuredMcpToken = opts.mcpToken === undefined ? process.env.KANBAN_MCP_TOKEN : opts.mcpToken;
   const mcpToken = configuredMcpToken?.trim() || null;
   const publicMcpManager = mcpToken === null
@@ -437,6 +445,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       coordinator,
       mcpToken,
       system.dryRun,
+      campaignService,
     );
 
   await opts.beforeRecovery?.();

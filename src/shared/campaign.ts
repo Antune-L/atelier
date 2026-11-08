@@ -157,7 +157,8 @@ export const campaignSkillFingerprintSchema = z.object({
 });
 export type CampaignSkillFingerprint = z.infer<typeof campaignSkillFingerprintSchema>;
 
-export type CampaignPlanIssue = { code: string; message: string; path?: string };
+export const campaignPlanIssueSchema = z.object({ code: z.string(), message: z.string(), path: z.string().optional() });
+export type CampaignPlanIssue = z.infer<typeof campaignPlanIssueSchema>;
 
 export function campaignDescendants(cards: readonly Pick<CampaignCardPlan, "id" | "dependsOn">[], roots: Iterable<string>): Set<string> {
   const result = new Set<string>();

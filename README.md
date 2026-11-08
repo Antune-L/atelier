@@ -50,6 +50,8 @@ For a review card, `get_ticket` also returns `reviewVerdict` once every reviewer
 
 `analyze_tickets` takes a non-empty list of identifiers and starts only their feasibility study in the background; it starts no implementation. The response separates accepted identifiers (`startedIds`) from missing or already busy cards (`rejected`); the study results are then recorded on each card.
 
+Autonomous campaigns add `submit_campaign_plan`, `check_campaign_readiness`, `install_campaign_skill`, `approve_campaign`, `get_campaign` (read with a cursor), `list_campaigns`, `pause_campaign`, `resume_campaign` and `cancel_campaign`: a plan of several cards runs on its own on the VPS, each card is merged into a campaign branch, and one final pull request (never merged automatically) is validated on a Coolify preview. See [docs/campaigns.md](docs/campaigns.md).
+
 `update_ticket` edits an existing card as long as it sits in TODO and no analysis or implementation is running. It accepts the content and every editable option in the form, in particular the project, the branch, the dependency, the models, the efforts, the orchestrator, the implementer and the pipeline options. An omitted field stays unchanged; `null` and `false` are explicit values. This tool neither moves nor starts the card.
 
 ## How it works
@@ -72,5 +74,6 @@ The board routes work, the backend verifies gates, and the agents do the reasoni
 | --- | --- |
 | [docs/development.md](docs/development.md) | Run from source, dry-run vs real mode, env vars, desktop app, releases, required Claude Code skills |
 | [docs/architecture.md](docs/architecture.md) | Source layout, agent runtime (Agent SDK), ticket flow |
+| [docs/campaigns.md](docs/campaigns.md) | Autonomous campaigns driven over MCP: plan, readiness, execution into a campaign branch, final pull request, report |
 | [docs/coolify-previews.md](docs/coolify-previews.md) | Configure, prepare, validate and clean up GitHub previews with Coolify |
 | [AGENTS.md](AGENTS.md) | Guidance for coding agents working on this repository |

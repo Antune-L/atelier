@@ -21,6 +21,10 @@ The default correction budget is one correction and the default execution deadli
 7. PR-only delivery verifies the PR and never requests a merge. Merge delivery verifies native policies and uses GitHub's synchronous merge endpoint with the expected source commit. A repository requiring a merge queue blocks this pilot instead of silently enqueueing work. Only a confirmed merge counts as merged.
 8. The backend persists the confirmed host outcome, cleans the owned preview, then completes the card and releases its slot. Cleanup failure retains the confirmation and worktree for reconciliation without repeating delivery.
 
+## Campaign final card
+
+An [autonomous campaign](campaigns.md) creates one autonomous card at finalization. It is linked to the campaign instead of using a dependency or split order, so the pilot accepts it. It adopts the existing campaign branch rather than creating its own, while its pull request targets the base branch: work base and pull request target are separate only for this card. Its delivery is always **Create the PR without merging**; a merge delivery is refused. Its preview is kept after delivery until the campaign's review time. Ordinary campaign cards are not autonomous: they run the ordinary pipeline and the campaign merges them into its branch.
+
 ## Recovery and access
 
 The plan, commit, run identifiers, preview ownership, delivery choice and host confirmation survive restart. Interrupted validation can be retried after its environment cleanup completes. A paused run keeps its session waiting; **Reprendre le parcours** in the Validation tab asks that session to call `validate_autonomous` again, so the review gate and pushed-commit checks still apply. It fails when the session is unreachable. A confirmed host outcome cannot be rolled back through abandonment or an agent failure while cleanup is pending.

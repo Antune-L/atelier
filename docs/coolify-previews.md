@@ -147,6 +147,10 @@ Cleanup is confined to owned preview resources. Shared image layers and build ca
 
 The configured lifetime starts the expiration workflow, but expiration and cleanup require Kanban Agents' backend to be running. If the Mac is offline or the application is closed, the backend recovers overdue work on restart. Do not assume an expired URL has been removed until cleanup reports completion.
 
+### Campaign previews
+
+The final card of an [autonomous campaign](campaigns.md) keeps its preview after delivery until the review time approved in the plan, so the user can check the final pull request on it; the campaign then stops it and reports a cleanup failure instead of hiding it. An explicit stop or the configured lifetime still applies. The readiness check of a campaign counts active previews plus one reserved broker slot for each other approved campaign that has no final preview yet, against `KANBAN_PREVIEW_MAX_ACTIVE` (default 3, mirrors the broker's `maxActivePreviews`).
+
 ## Troubleshooting
 
 | What you see | What to check |

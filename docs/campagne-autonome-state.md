@@ -1,39 +1,79 @@
 # Autonomous campaign — working state
 
-## Current state
+## Current state (2026-11-07)
 
-- PRD: `plans/20261107-campagne-autonome.prd.json` in the main checkout (`/Users/antoineliu/kanban-agents`, untracked: `plans/` is gitignored). Started from revision 10.
-- Worktree: `/Users/antoineliu/.t3/worktrees/kanban-agents/feat-campagne-autonome`. Base: `origin/main` at `dd73e47` (it already ships 10 public MCP tools, not 8: `list_open_prs` and `create_review_ticket` landed before this work).
-- Branch stack (each PR targets the branch below it):
-  - `feat/campagne-t1-storage` (T1) → `main`
-  - `feat/campagne-t2-plan-intake` (T2, plus simplify commit `d3509ec`) → T1
-  - `feat/campagne-t9-adopt-mother` (T9) → T2
-  - T3, T5, T6, T7, T10 stack above T9 in that order.
-  - `feat/campagne-t4-memory-admission` (T4) → `main`, independent.
-- Next action: finish T3 (campaign engine), then T5, T6, T7, T10 docs; T8 stops before any VPS action.
+- PRD: `plans/20261107-campagne-autonome.prd.json` in the main checkout (`/Users/antoineliu/kanban-agents`, untracked: `plans/` is gitignored). Now **revision 11**: FR14 attached to T2 and T3, FR15 to T2 (acceptance and boundaries added); `.prd.html` re-rendered. `.complet.html` (PRD + Orchestrator mockup) was not regenerated.
+- Base: `origin/main` at `dd73e47` (it already ships 10 public MCP tools, not 8).
+- Pull requests (all draft, none merged):
+
+| Task | Branch | PR | Base |
+| --- | --- | --- | --- |
+| T1 storage | `feat/campagne-t1-storage` | #270 | `main` |
+| T2 plan intake, FR14, FR15 | `feat/campagne-t2-plan-intake` | #271 | T1 |
+| T9 adopt mother branch | `feat/campagne-t9-adopt-mother` | #273 | T2 |
+| T3 engine | `feat/campagne-t3-engine` | #274 | T9 |
+| T5 quota pause | `feat/campagne-t5-quota` | #275 | T3 |
+| T6 finalization | `feat/campagne-t6-finalization` | #276 | T5 |
+| T7 report, commands, FR10 | `feat/campagne-t7-report` | #277 | T6 |
+| T10 VPS config and docs | `feat/campagne-t10-ops` | #278 | T7 |
+| T4 memory admission | `feat/campagne-t4-memory-admission` | #272 | `main` |
+
+- Each PR had a review before opening that found and fixed real defects (listed in the PR bodies). The per-PR simplifier reports are confirmed only for T1, T2, T3, T4, T7 and T9.
+- 2026-11-08: explicit simplifier pass over the whole stack (`main` to T10), committed on T2, T3, T5, T6 and T7 and merged upward without rewriting history. T1, T9 and T10 needed no change. T4 was out of this pass.
+- Next action: wait for the user's decisions (merge order, VPS steps of T10, T8 real run); nothing on the VPS was touched.
 
 ## Design decisions (verified against the code)
 
-- No mother ticket. The campaign row owns the mother branch, so the split mother's `done` column can never trigger finalization and nothing new appears in statistics.
-- Campaign cards are ordinary feature tickets with `dependsOn = null` and `baseBranch = <mother>`: `resolveBaseBranch` forks them from the mother and `resolvePrTargetBaseBranch` targets the mother. Multiple prerequisites live in the campaign plan; `dependsOn`, `isDependencyReady` and `prdMarkdown` stay single-parent and unchanged for ordinary cards.
-- Cards are created with `autoMerge = false`. The campaign engine performs every merge into the mother through a journaled operation, after checking the campaign state (not paused, not finalizing), the PR target (the mother, never the base branch: NFR1) and a clean review (`skipMerge` false). Conflicts get one bounded resolution (`AUTO_MERGE_RESOLVE_MAX`).
-- The final card is an autonomous (Devin) ticket with `baseBranch = main`, no `dependsOn`/`childOrder`, linked through `campaigns.final_ticket_id`. `resolveAdoptedWorkBranch` makes `launchInSlot` check out the existing mother branch instead of forking (T9).
-- FR15: the VPS cannot call the Mac (the bridge is Mac-initiated only, `vpsBridge.ts`). `install_campaign_skill` therefore accepts the skill folder sent by the Orchestrator (its "Copier vers…" transfer from the other machine) or fetches skillzer at the pinned commit `8f3ccad6e73c4629c51c1ffed535009bf32eeac2` (verified with `git ls-tree`: contains `argus-review`, not `simplifier`).
-- Implementer caps live in `src/shared/constants.ts` (not `src/server/constants.ts`).
+- No mother ticket. The campaign row owns the mother branch, so the split mother's `done` column never triggers finalization and statistics are unchanged.
+- Campaign cards are ordinary feature tickets with `dependsOn = null`, `baseBranch = <mother>` and `autoMerge = false`: they fork from and target the mother. Multiple prerequisites live in the campaign plan; `dependsOn`, `isDependencyReady` and `prdMarkdown` stay single-parent and unchanged.
+- The engine performs every merge into the mother through a journaled operation (PR re-read first, target must be the mother, review clean), one bounded conflict resolution.
+- The final card is an autonomous (Devin) ticket, `pr_only`, `baseBranch = main`, linked through `campaigns.final_ticket_id`; `resolveAdoptedWorkBranch` makes it check out the existing mother branch (T9). Its preview is kept until the review time.
+- FR15: the VPS cannot call the Mac (bridge is Mac-initiated). `install_campaign_skill` accepts the folder sent by the Orchestrator, or fetches skillzer at `8f3ccad6e73c4629c51c1ffed535009bf32eeac2` (verified: `argus-review` present, `simplifier` absent).
+- Implementer caps live in `src/shared/constants.ts`, not `src/server/constants.ts`.
 
 ## Verified findings
 
-- No existing quota-refusal detection: Claude `rate_limit_event.status` is only rendered, Codex `describeCodexError` has no quota branch (`codexProvider.ts:274-292`). T5 must add detection.
-- `SlotManager.pumpQueue` has no admission gate; campaign start gating goes through `CampaignSlotHooks.assertMayStart` in `startReadyTicket` and `retry`.
-- Autonomous previews are always stopped at delivery (`autonomousWorkflow.finishDelivery`) and refused once `deliveryConfirmation` exists (`previewManager.ts:612-619`). T6 must add retention until the review time.
-- The preview broker allows 3 active previews by default (`deploy/preview-broker/broker.ts:11`); there is no capacity API, so readiness counts non-cleaned previews plus reservations of other approved campaigns.
+- Before this work nothing detected a quota refusal; T5 adds detection for a rejected Claude rate-limit window and for session errors naming a usage limit (narrow pattern on purpose).
+- Autonomous previews were always stopped at delivery and forced to stop afterwards; T6 adds retention for the campaign final card only.
+- The preview broker allows 3 active previews by default and has no capacity API.
 
-## Checks
+## Checks (latest)
 
-- T1+T2: typecheck, lint pass; `bun test` 940 pass, 3 skip, 0 fail. Simplifier and regression-check: no regression (10 existing public MCP tools and the remote MCP list unchanged, schema additive).
-- T4: typecheck, lint pass; `bun test` 925 pass after rebase on `dd73e47`. Simulated only (fake cgroup/disk readers); the real VPS cgroup read is unverified.
+- Stack tip (T10), after the simplifier pass: typecheck and lint pass; `bun test` 971 pass, 3 skip, 0 fail. T2, T3, T5, T6 and T7 were each checked with typecheck, lint on the touched code and the campaign tests.
+- T4: 925 pass, 3 skip, 0 fail.
+- Everything above is simulated (fake system, fake GitHub, fake slots). No real provider, GitHub or Coolify run has been done.
+
+## T8 — real qualification on the VPS (prepared, not started)
+
+Preconditions, each needing the user's approval:
+1. Merge order: T4 and the campaign stack into `main` (user decision; nothing is merged).
+2. On the VPS: `sudo kanban-upgrade --sha <merged sha>`, then `sudo kanban-bootstrap --sha <sha> --with-previews --with-campaigns --restart` (installs `campaigns.conf`, restarts only when idle). Record the `Config` section it prints: MemoryMax, drop-ins, KANBAN_SLOTS, campaign settings, and the broker's `maxActivePreviews`.
+3. A disposable GitHub test repository with a Dockerfile preview recipe, a protected `main`, a `campaign/**` ruleset without required approval or merge queue, and CI on pull requests to `campaign/**`.
+4. Mac switched off; the Orchestrator talks to the VPS public MCP only.
+
+Scenario matrix (simulated coverage today → real run expected):
+
+| # | Scenario | Expected state | Simulated by |
+| --- | --- | --- | --- |
+| 1 | Plan A → B, C, D independent, Claude | 4 PRs to the mother, B after A merged, final PR to main (non-draft), verdict ready or partial | `campaignEngine.test.ts` |
+| 2 | Same with Codex cards | same | none (provider-independent code, real run required) |
+| 3 | Restart during a card session | session interrupted, card repaired as incident, no duplicate card/PR | engine restart tests |
+| 4 | Stop the service during a merge | journaled merge confirmed on GitHub after restart, not repeated | restart test |
+| 5 | Conflict between two cards | one bounded resolution, then card and descendants blocked, others continue | conflict test |
+| 6 | Question the plan does not settle (e.g. a real email) | card blocked, question in the report, no notification | engine sync (no dedicated test) |
+| 7 | Quota exhausted at night | `quota_paused`, sessions stopped, progressive resume when observed quota returns | quota tests |
+| 8 | Budget exhausted | no new start, finalization with what is merged | quota/budget test |
+| 9 | Two campaigns on one repository | the second waits in `queued` | engine test |
+| 10 | Preview cleanup failure | reported with its error, captures kept | finalization test |
+| 11 | Resume later with a new deadline and budget | extension recorded, cards restart | command tests |
+| 12 | Ordinary cards meanwhile (GitHub and Azure) | unchanged behaviour | full suite only |
+
+Also measure the memory footprint per session (cgroup `memory.current` while N implementers run) and set `KANBAN_IMPLEMENTER_MEMORY_MB` / `KANBAN_MEMORY_RESERVE_MB` from it. No scenario sends real email.
 
 ## Open questions
 
 - T4: memory only restricts admission above the first 4 implementers (to keep today's behaviour without configuration). Keep that floor? (recommended: yes)
-- T4: the free-disk threshold (2 GB, `KANBAN_MIN_FREE_DISK_MB`, `0` disables) is on by default. Keep it? (recommended: yes)
+- T4: the free-disk threshold (2 GB default, `KANBAN_MIN_FREE_DISK_MB`, `0` disables) is on by default, so even the first lot waits on a nearly full disk. Keep it? (recommended: yes)
+- T5: the quota-error pattern is narrow and unverified against real Codex/Claude messages; widen it from messages captured in T8. A Codex usage-limit error inside a delegated child lot is not detected.
+- Plan-level `quotaPolicy.fallbackProvider` is stored but never applied (FR9 only forbids switching without consent).
+- Reopening a reported campaign relies on autonomous delivery reusing the open final PR from the mother branch; unverified.

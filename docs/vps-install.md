@@ -300,6 +300,17 @@ The second command caches the pinned Playwright MCP for the `kanban` user, becau
 - `sudo cat /var/lib/kanban-preview/registry.json` lists the preview with `deletedAt` set after cleanup.
 - `sudo -u kanban cat /etc/kanban-preview/config.json` is refused.
 
+## Autonomous campaigns
+
+[Campaigns](./campaigns.md) run on the VPS only, driven by the Orchestrator through the local public MCP (`KANBAN_MCP_TOKEN`), with the Mac switched off. They need Phase B (previews), the VPS as quality owner (B4), GitHub logins for the project account, and Claude and Codex logins for the `kanban` user.
+
+1. Install the campaign settings with `sudo kanban-bootstrap --sha <sha> --with-previews --with-campaigns`. They live in the drop-in `/etc/systemd/system/kanban.service.d/campaigns.conf`: `KANBAN_AUTONOMOUS_PILOT=1` (the base unit disables the pilot), `KANBAN_MAX_IMPLEMENTERS=8`, `KANBAN_IMPLEMENTER_MEMORY_MB=1536`, `KANBAN_MEMORY_RESERVE_MB=1024` and `KANBAN_MIN_FREE_DISK_MB=4096`. Admission above four implementers reads the service's cgroup (`MemoryMax=75%` in the unit), never `/proc/meminfo`. Tune the memory values from measured session footprints. Without the drop-in the cap stays at four.
+2. `kanban-bootstrap`, in setup and `--check` mode, ends with a `Config` section showing what the service actually runs with: `MemoryMax`, the installed drop-ins, each campaign setting (`/etc/kanban/kanban.env` overrides the units, as in systemd) and `KANBAN_SLOTS`. `GET /api/implementer-capacity` shows the live admission state.
+3. Install the `simplifier` and `argus-review` skills for the `kanban` user (`~/.claude/skills` and `~/.agents/skills`), or let the Orchestrator install them after the readiness check asks; internal guidance replaces a missing one.
+4. Check from the Orchestrator that `check_campaign_readiness` reports no blocked item for the target project: protected base branch, a mother-branch pattern with no required approval or merge queue, CI on pull requests to `campaign/**` (or its absence accepted in the plan), a ready preview recipe and a free broker slot.
+
+`kanban-upgrade` never reinstalls drop-ins: after a commit changes `deploy/vps/kanban.service.d/campaigns.conf`, run `kanban-bootstrap` again (see [Upgrade](#upgrade)).
+
 ## Remote MCP (milestone 1)
 
 This lets Claude Code or Codex on the Mac list projects and cards and create TODO cards on the VPS board, through a dedicated listener behind Cloudflare Access Managed OAuth. It is independent of Phase B. The Cloudflare side, the Mac clients and the kill switch are in [vps-remote-access.md](./vps-remote-access.md#remote-mcp-milestone-1), which must already be done up to step 12 for the board.

@@ -20,7 +20,7 @@ import { getErrorMessage } from "../shared/errors.ts";
 import { terminalViewportSchema } from "../shared/schemas.ts";
 
 import { AtelierManager } from "./agents/atelierManager.ts";
-import { buildCampaignService } from "./campaign/wiring.ts";
+import { buildCampaignEngine, buildCampaignService } from "./campaign/wiring.ts";
 import { AutonomousWorkflow } from "./agents/autonomousWorkflow.ts";
 import { createAutonomousSessionGuard } from "./agents/autonomousSessionGuard.ts";
 import { AgentCoordinator } from "./agents/coordinator.ts";
@@ -435,7 +435,9 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     dataRoot,
     previewReadiness: (project, branch) => previewManager.readiness(project, branch),
     quota: (provider) => quotaService.read(provider),
+    onChange: () => campaignEngine.wake(),
   });
+  const campaignEngine = buildCampaignEngine({ store, system, slots: slotManager, lifecycle, notifier, service: campaignService, dryRun: system.dryRun, dataRoot });
   const configuredMcpToken = opts.mcpToken === undefined ? process.env.KANBAN_MCP_TOKEN : opts.mcpToken;
   const mcpToken = configuredMcpToken?.trim() || null;
   const publicMcpManager = mcpToken === null
@@ -465,6 +467,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       atelierManager.recoverStale();
       repoSnapshots.start();
       slotManager.resumeQueuedTickets();
+      campaignEngine.start();
       watchdog.start();
       automationManager.start();
     })();
@@ -673,6 +676,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       await feasibilityManager.teardownAll();
     },
     async stop() {
+      await campaignEngine.stop();
       await coordinator.stopAutonomousDeliveries();
       await autonomousWorkflow.shutdown();
       await slotManager.drainAutonomousPublications();

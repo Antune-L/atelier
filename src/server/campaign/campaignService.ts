@@ -107,6 +107,10 @@ function assertCurrentVersion(campaign: Campaign, version: number | undefined): 
   if (version !== undefined && version !== campaign.currentVersion) throw new TicketOperationError("CONFLICT", `stale version ${version}; current version is ${campaign.currentVersion}.`);
 }
 
+function blockedReadinessSummary(readiness: CampaignReadiness): string {
+  return readiness.items.filter((entry) => entry.status === "blocked").map((entry) => `${entry.id}: ${entry.cause ?? "blocked"}`).join(" | ");
+}
+
 function assertNotTerminal(campaign: Campaign): void {
   if (TERMINAL_CAMPAIGN_STATUSES.includes(campaign.status)) throw new TicketOperationError("CONFLICT", `campaign ${campaign.id} is ${campaign.status}.`);
 }
@@ -210,7 +214,7 @@ export class CampaignService {
     return campaign.motherBranch ?? campaignMotherBranch(campaign.id, plan.title, plan.motherBranch);
   }
 
-  async checkReadiness(input: z.infer<typeof checkCampaignReadinessInputSchema>): Promise<CampaignReadiness> {
+  async checkReadiness(input: z.infer<typeof checkCampaignReadinessInputSchema>, approvedBaseRevision: string | null = null): Promise<CampaignReadiness> {
     const campaign = this.requireCampaign(input.campaignId);
     const version = this.store.requireVersion(campaign.id, input.version ?? campaign.currentVersion);
     const readiness = await checkCampaignReadiness({
@@ -218,12 +222,19 @@ export class CampaignService {
       version: version.version,
       plan: version.plan,
       motherBranch: this.motherBranch(campaign, version.plan),
-      approvedBaseRevision: null,
+      approvedBaseRevision,
     }, this.deps.readiness);
     const fresh = this.requireCampaign(campaign.id);
     this.store.update(campaign.id, { runtime: { ...fresh.runtime, readiness } }, this.now());
     this.store.appendEvent(campaign.id, CAMPAIGN_EVENT.readinessChecked, { version: version.version, ready: readiness.ready, blocked: readiness.items.filter((entry) => entry.status === "blocked").map((entry) => entry.id) }, this.now());
     return readiness;
+  }
+
+  /** Readiness re-run when an approved campaign starts after waiting, including drift of the base branch since approval (FR2). */
+  async readyToStart(campaign: Campaign): Promise<{ ready: boolean; reason: string | null }> {
+    if (campaign.approvedVersion === null) return { ready: false, reason: "The campaign has no approved version." };
+    const readiness = await this.checkReadiness({ campaignId: campaign.id, version: campaign.approvedVersion }, campaign.runtime.approvedBaseRevision);
+    return { ready: readiness.ready, reason: blockedReadinessSummary(readiness) || null };
   }
 
   async installSkill(input: z.infer<typeof installCampaignSkillInputSchema>): Promise<{ outcome: SkillInstallOutcome; readiness: CampaignReadiness | null }> {
@@ -257,10 +268,7 @@ export class CampaignService {
       const blockers = campaignApprovalBlockers(version.plan);
       if (blockers.length > 0) throw invalid(blockers);
       const readiness = await this.checkReadiness({ campaignId: campaign.id, version: input.version });
-      if (!readiness.ready) {
-        const blocked = readiness.items.filter((entry) => entry.status === "blocked");
-        throw new TicketOperationError("CONFLICT", `campaign is not ready: ${blocked.map((entry) => `${entry.id}: ${entry.cause ?? "blocked"}`).join(" | ")}`);
-      }
+      if (!readiness.ready) throw new TicketOperationError("CONFLICT", `campaign is not ready: ${blockedReadinessSummary(readiness)}`);
       const skills = readCampaignSkills(this.deps.skillRoots);
       const now = this.now();
       const approved = this.store.runInTransaction(() => {

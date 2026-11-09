@@ -162,9 +162,18 @@ ProtectHome=tmpfs
 BindPaths=/home/ubuntu/orchestrateur:/home/ubuntu/orchestrateur
 ```
 
-This is local administrator configuration, not a release artifact or executable helper. For each additional checkout, create a separately named drop-in and add its same-path `BindPaths` entry; keep `ProtectHome=tmpfs` and the service identity unchanged. This exposes only approved checkouts without mounting each temporary worktree. Confirm the service is idle before `sudo systemctl daemon-reload`, then restart it with `sudo systemctl restart kanban`. Inspect `sudo systemctl status kanban --no-pager`, `sudo journalctl -u kanban -n 50 --no-pager`, and the effective service namespace before registering the project. The later `kanban-upgrade --sha` procedure also restarts the service, so do not restart a second time after that upgrade. Do not add broad `ReadWritePaths` for `/home` or disable the existing systemd protections.
+This is local administrator configuration, not a release artifact or executable helper. For each additional checkout, create a separately named drop-in and add its same-path `BindPaths` entry; keep `ProtectHome=tmpfs` and the service identity unchanged. This exposes only approved checkouts without mounting each temporary worktree. Confirm the service is idle before `sudo systemctl daemon-reload`, then restart it with `sudo systemctl restart kanban`. Inspect `sudo systemctl status kanban --no-pager`, `sudo journalctl -u kanban -n 50 --no-pager`, and the effective service namespace before registering the project. The later `kanban-upgrade --sha` procedure also restarts the service, so do not restart a second time after that upgrade. Do not add broad `ReadWritePaths` for `/home` or disable the existing systemd protections, except for the `RestrictSUIDSGID` exception described below.
 
 **Grant narrow, inherited Git administration access.** The `acl` package is required for `setfacl`; confirm it is available before this step. Back up the checkout's current ACLs and Git configuration first, and retain those backups for recovery. Apply the tested access policy to the shared `.git` directory and its descendants: named `rwX` ACLs for `ubuntu` and `kanban`, default ACLs on directories for both users, and a default ACL mask of `rwx`. Configure `core.sharedRepository=0660` in that repository. This lets both tools maintain Git's shared administration metadata while preserving the checkout owner's existing ownership. The checkout contents need only read and traversal access for `kanban`; do not grant recursive checkout write access. Do not change ownership recursively, copy personal Git credentials, or grant `ubuntu` access to Atelier's slots or temporary directories. Verify the effective ACL inheritance with new files and directories created by each account before registration. The ACL fixture qualified this policy, but a mode explicitly created as private can still require investigation rather than a broader grant.
+
+**Allow Git to set the setgid bit.** With `core.sharedRepository` set, Git sets the setgid bit on every directory it creates, and the `RestrictSUIDSGID=yes` setting of `kanban.service` rejects that call. `git worktree add` then fails with `Operation not permitted`. Create one root-owned, mode `0644` drop-in at `/etc/systemd/system/kanban.service.d/shared-git-repository.conf`, once per machine, with this complete content, and apply it with the same idle check, `daemon-reload` and restart as above:
+
+```ini
+[Service]
+RestrictSUIDSGID=no
+```
+
+Keep `NoNewPrivileges=yes` and the other protections unchanged.
 
 Configure Git trust only for the exact approved checkout path if Git reports that it is not trusted. Do not use a wildcard `safe.directory` entry or import the other user's global Git configuration. No such trust error was observed in the qualification fixture, so do not add an exception preemptively.
 

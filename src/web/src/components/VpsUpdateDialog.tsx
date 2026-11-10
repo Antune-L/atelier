@@ -8,13 +8,26 @@ import type { ProviderVersions } from "@shared/providerUpdates";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { request } from "@/lib/api";
+import { ApiError, request } from "@/lib/api";
 import { formatDateTime } from "@/lib/display";
 import { useProviderUpdates } from "@/hooks/useProviderUpdates";
 
 const REFRESH_MS = 3_000;
 const REQUEST_TIMEOUT_MS = 15_000;
 const UPDATE_PATH = "/api/vps-update";
+const HTTP_CLIENT_ERROR = 400;
+const HTTP_SERVER_ERROR = 500;
+const UNCONFIRMED_REQUEST_MESSAGE = "La demande n’a pas été confirmée. Consultez l’état avant de réessayer : une coupure peut accompagner le redémarrage.";
+const UPDATE_ERRORS: Readonly<Record<string, string>> = {
+  "Finish active provider work before updating.": "Terminez les tâches actives des agents avant de lancer la mise à jour.",
+  "Finish the active Claude login before updating.": "Terminez la connexion Claude en cours avant de lancer la mise à jour.",
+  "Upgrade the root updater before starting an application update. No update was started.": "Le service de mise à jour du VPS doit être actualisé. Aucune mise à jour n’a été lancée.",
+  "Finish or inspect the existing updater operation before starting another update.": "Terminez ou vérifiez la mise à jour en cours avant d’en lancer une autre.",
+  "A same-origin cloud UI confirmation is required.": "Lancez la mise à jour depuis l’interface du VPS après vous être connecté.",
+  "Invalid update target.": "La version à installer est invalide. Fermez cette fenêtre et vérifiez la version proposée.",
+  "Updater status unavailable. No update was started.": "Le service de mise à jour est indisponible. Aucune mise à jour n’a été lancée.",
+  "Update acknowledgement unavailable. Admission remains closed; inspect the updater before restarting the server.": "La demande n’a pas été confirmée. Le lancement des agents reste bloqué : vérifiez l’état de la mise à jour avant de redémarrer le serveur.",
+};
 
 const UPDATE_STEPS = [
   { label: "Préparation de la version", matches: /^(Taking the upgrade lock|Resolving the target commit|Checking free disk space)/ },
@@ -117,9 +130,13 @@ export function VpsUpdateDialog({ onClose, target, providers }: { onClose: () =>
   const confirmedTarget = target ?? providerUpdates?.target?.id;
   const confirmedProviders = providers ?? providerUpdates?.target?.providers;
   const [status, setStatus] = useState<VpsUpdateStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [polling, setPolling] = useState(true);
+  const uncertainAttempt = useRef<VpsUpdateStatus | null>(null);
   const runningUpdatedAt = useRef<number | null>(null);
+  const error = startError ?? connectionError;
 
   useEffect(() => {
     if (status === null) return;
@@ -133,34 +150,56 @@ export function VpsUpdateDialog({ onClose, target, providers }: { onClose: () =>
   }, [status]);
 
   useEffect(() => {
+    if (!polling || pending) return;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     async function refresh(): Promise<void> {
       try {
         const result: unknown = await request(UPDATE_PATH, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
         if (disposed) return;
-        if (result === null) return;
-        setStatus(vpsUpdateSchema.parse(result));
-        setError(null);
+        if (result === null) { setPolling(false); return; }
+        const next = vpsUpdateSchema.parse(result);
+        const previous = uncertainAttempt.current;
+        if (previous && (next.attemptId !== previous.attemptId || next.updatedAt > previous.updatedAt)) {
+          uncertainAttempt.current = null;
+          runningUpdatedAt.current = previous.updatedAt;
+          setStartError(null);
+        }
+        setStatus(next);
+        setConnectionError(null);
+        if (next.phase !== "resolving" && next.phase !== "running" && uncertainAttempt.current === null) {
+          setPolling(false);
+          return;
+        }
       } catch {
         if (disposed) return;
-        setError("Service de mise à jour indisponible. Reconnexion automatique ; vérifiez votre connexion Cloudflare Access si cela persiste.");
+        setConnectionError("Service de mise à jour indisponible. Reconnexion automatique ; vérifiez votre connexion Cloudflare Access si cela persiste.");
       }
       if (!disposed) timer = setTimeout(() => { void refresh(); }, REFRESH_MS);
     }
     void refresh();
     return () => { disposed = true; clearTimeout(timer); };
-  }, []);
+  }, [pending, polling]);
 
   async function start(): Promise<void> {
     setPending(true);
-    setError(null);
+    setStartError(null);
+    setConnectionError(null);
+    setPolling(false);
+    uncertainAttempt.current = null;
     try {
       if (!confirmedTarget) throw new Error("No checked update target.");
       const result: unknown = await request(UPDATE_PATH, { method: "POST", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), headers: { "x-kanban-update": "confirm", "x-kanban-target": confirmedTarget, ...(target ? { "x-kanban-adoption": "confirm" } : {}) } });
-      setStatus(vpsUpdateSchema.parse(result));
-    } catch {
-      setError("La demande n’a pas été confirmée. Consultez l’état avant de réessayer : une coupure peut accompagner le redémarrage.");
+      const next = vpsUpdateSchema.parse(result);
+      setStatus(next);
+      setPolling(next.phase === "resolving" || next.phase === "running");
+    } catch (failure) {
+      const message = failure instanceof ApiError ? UPDATE_ERRORS[failure.message] ?? failure.message : UNCONFIRMED_REQUEST_MESSAGE;
+      setStartError(message);
+      if (!(failure instanceof ApiError) || failure.status < HTTP_CLIENT_ERROR || failure.status >= HTTP_SERVER_ERROR) {
+        uncertainAttempt.current = status;
+        setPolling(true);
+      }
     } finally {
       setPending(false);
     }
@@ -179,7 +218,7 @@ export function VpsUpdateDialog({ onClose, target, providers }: { onClose: () =>
         <>
           <Button variant="outline" onClick={onClose}>{isRunning || isFailure || error !== null ? "Fermer" : "Annuler"}</Button>
           {!isRunning && !isFailure && (
-            <Button disabled={!canStart || pending || error !== null} onClick={() => { void start(); }}>
+            <Button disabled={!canStart || pending || polling || connectionError !== null} onClick={() => { void start(); }}>
               {pending ? "Démarrage…" : "Mettre à jour"}
             </Button>
           )}
@@ -189,7 +228,7 @@ export function VpsUpdateDialog({ onClose, target, providers }: { onClose: () =>
       {confirmedTarget && <p className="text-sm">Version confirmée : <strong className="font-mono">{confirmedTarget}</strong>{confirmedProviders && <> · Claude {confirmedProviders.claude} · Codex {confirmedProviders.codex}</>}</p>}
       {!confirmedTarget && <p role="status" className="text-sm">{targetError ?? providerUpdates?.message ?? "Vérification de la version à installer…"}</p>}
       {status === null && error === null && <p role="status" className="text-sm text-muted-foreground">Chargement de l’état de la mise à jour…</p>}
-      {status !== null && (isRunning ? <RunningStatus status={status} reconnecting={error !== null} /> : <FinishedStatus status={status} />)}
+      {status !== null && (isRunning ? <RunningStatus status={status} reconnecting={connectionError !== null} /> : <FinishedStatus status={status} />)}
       {canStart && (
         <div className="space-y-3">
           <div className="flex items-start gap-2 rounded-md border bg-secondary p-3 text-sm">

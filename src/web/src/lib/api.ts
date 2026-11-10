@@ -129,10 +129,16 @@ export function atelierPrdExportUrl(id: string, format: "json" | "html"): string
   return `${atelierPrdPath(id)}/export.${format}`;
 }
 
-async function responseError(response: Response): Promise<Error> {
+export class ApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
+}
+
+async function responseError(response: Response): Promise<ApiError> {
   const body = await response.json().catch(() => ({ error: response.statusText }));
   const message = body && typeof body === "object" && "error" in body ? String(body.error) : response.statusText;
-  return new Error(message);
+  return new ApiError(response.status, message);
 }
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {

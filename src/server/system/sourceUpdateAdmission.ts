@@ -94,14 +94,17 @@ export class SourceUpdateAdmission {
       const handle = start();
       const compact = handle.compact?.bind(handle);
       const dispose = handle.dispose?.bind(handle);
+      if (handle.closed) void handle.closed.then(release, () => undefined);
       return {
         ticketId: handle.ticketId,
+        ...(handle.closed ? { closed: handle.closed } : {}),
         send: handle.send.bind(handle),
         interrupt: handle.interrupt.bind(handle),
         ...(compact ? { compact } : {}),
         ...(dispose ? { dispose } : {}),
         close: async () => {
           await handle.close();
+          if (handle.closed) await handle.closed;
           release();
         },
       };

@@ -96,6 +96,8 @@ Preserved tmux shells are interactive user shells, not preserved in-process Clau
 
 Maintenance admission must defer owner-level preparation before validation/audit deadlines and fail no unrelated ticket merely because a provider start was denied. Track native session closure independently of a turn ending, and keep manual refusals ahead of run persistence. A packaged update must hold startup recovery until backend/native health is acknowledged; failed transaction receipts must not silently resume provider work.
 
+Forced provider disposal must expose confirmed termination independently of graceful close: a timed-out or rejected close may never settle after the process exits. Release source-update admission only after that confirmation, including disposal before Codex initialization completes. Keep definitive update refusals visible in the UI; a successful status read of an older attempt does not acknowledge the new request.
+
 Electrobun 1.18.1 postBuild runs before version.json is written, so a complete update ZIP must come from the final full archive. Its mutable latest lookup and delete-before-rename apply path are not an authenticated/recoverable installer. Preserve an old-app backup, verify a publisher-signed fixed manifest, distinguish publisher signatures from Apple signing, and retain manual first adoption for an absent feed/key. Preserve the signing key across releases and clear app-owned old native-binary environment pins across replacement.
 
 - Source update maintenance must survive process death: write the data-root recovery receipt before Git/dependency mutation, keep interrupted boots closed, and clear prepared receipts only after revision, package metadata and native health checks. Never describe code restoration as database rollback.

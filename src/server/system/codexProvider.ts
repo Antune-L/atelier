@@ -816,6 +816,14 @@ function createCodexAgentSession(
   const closedPromise = new Promise<void>((resolve) => {
     resolveClosed = resolve;
   });
+  let resolveStarted: (connection: CodexAppServerConnection | null) => void = () => {};
+  const startedPromise = new Promise<CodexAppServerConnection | null>((resolve) => {
+    resolveStarted = resolve;
+  });
+  const terminated = startedPromise.then(async (started) => {
+    await closedPromise;
+    if (started) await started.exited;
+  });
   let stopMonitoring = () => {};
 
   function emit(event: AgentSessionEvent): void {
@@ -1399,6 +1407,7 @@ function createCodexAgentSession(
           lastStderr = line;
         },
       });
+      resolveStarted(liveConnection);
       if (closing || cleaned) {
         await liveConnection.close();
         cleanup();
@@ -1481,6 +1490,7 @@ function createCodexAgentSession(
       scheduleDispatch();
       await finishIfDrained();
     } catch (error) {
+      resolveStarted(null);
       if (closing || cleaned) {
         await finishConnection();
         return;
@@ -1525,6 +1535,7 @@ function createCodexAgentSession(
 
   return {
     ticketId: options.ticketId,
+    closed: terminated,
     send: (content, messageId, images) => {
       const message = {
         id: messageId ?? nanoid(16),

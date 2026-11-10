@@ -262,6 +262,7 @@ export interface AgentSendOptions {
 /** A live handle to a running agent session. */
 export interface AgentSessionHandle {
   readonly ticketId: string;
+  readonly closed?: Promise<void>;
   /** Inject a user turn into the live session (contract / answer / nudge / user_comment). */
   /** Queue one identified user message and return its client id. */
   send(content: string, messageId?: string, images?: readonly AgentImageInput[], options?: AgentSendOptions): string;

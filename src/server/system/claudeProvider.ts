@@ -412,6 +412,7 @@ export function createSdkAgentSession(
 
   return {
     ticketId: opts.ticketId,
+    closed: pumping,
     send: enqueue,
     // `/compact` is a slash command: sent as a user turn, the CLI compacts and ends with a `result`.
     compact: async () => {

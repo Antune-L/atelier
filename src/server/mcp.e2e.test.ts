@@ -290,6 +290,7 @@ test("an official MCP client lists, creates idempotently, starts, and updates RE
   const tools = await client.listTools();
   const ticketTools = [
     "analyze_tickets",
+    "answer_feasibility_questions",
     "answer_question",
     "cancel_external_validation",
     "create_review_ticket",

@@ -15,14 +15,19 @@ import {
   analyzeTicketsSchema,
   commentSchema,
   createCommentSchema,
+  feasibilityAnswerBatchInputSchema,
   kindSchema,
   openPrSchema,
   ticketSchema,
+  triageStatusSchema,
+  triageVerdictSchema,
   updateTicketSchema,
 } from "../shared/schemas.ts";
 
 import { createApplicationVersionReader } from "./applicationVersion.ts";
 import type { AgentCoordinator } from "./agents/coordinator.ts";
+import { FeasibilityAnswerError } from "./agents/feasibilityAnswerManager.ts";
+import type { FeasibilityAnswerManager } from "./agents/feasibilityAnswerManager.ts";
 import { CAMPAIGN_TOOLS, runCampaignTool } from "./campaign/campaignMcpTools.ts";
 import type { CampaignService } from "./campaign/campaignService.ts";
 import { effectivePort, isLoopbackHost, parseHost } from "./requestGuard.ts";
@@ -32,6 +37,7 @@ import type { TicketOperations } from "./ticketOperations.ts";
 
 const HTTP_BAD_REQUEST = 400;
 const HTTP_UNAUTHORIZED = 401;
+const HTTP_NOT_FOUND = 404;
 const HTTP_FORBIDDEN = 403;
 const SERVER_NAME = "atelier";
 const SERVER_VERSION = "1.0.0";
@@ -174,12 +180,38 @@ const reviewVerdictOutputSchema = z.object({
   }).describe("Findings retained after verification, deduplication across reviewers and user dismissals, counted by severity."),
   dismissed: z.number().int().nonnegative().describe("Findings dismissed by the user (false positive or accepted risk), excluded from the counts above."),
 });
+const feasibilityQuestionOutputSchema = z.object({
+  index: z.number().int().nonnegative().describe("Stable position of the question in the current report, passed back as questionIndex."),
+  question: z.string(),
+  recommendedAnswer: z.string().nullable().describe("Answer recommended by the study, or null."),
+  answerStatus: z.enum(["open", "running", "done", "failed"]).describe("open: no answer submitted. running: the answer is being integrated into the description. done: integrated. failed: integration failed, submit again."),
+  answer: z.string().nullable(),
+  runId: z.string().nullable().describe("Identifier of the latest answer integration of this question, or null."),
+  error: z.string().nullable(),
+});
+const feasibilityOutputSchema = z.object({
+  status: triageStatusSchema.describe("none: no study. running: wait for the verdict. done: the verdict is available. failed: the study could not finish."),
+  verdict: triageVerdictSchema.nullable(),
+  summary: z.string().nullable().describe("Summary of the study, or the failure reason when status is failed."),
+  reasons: z.array(z.string()),
+  revision: z.number().int().nonnegative().describe("Current card revision, passed back to answer_feasibility_questions."),
+  reportVersion: z.number().int().nonnegative().describe("Current report version, passed back to answer_feasibility_questions."),
+  questions: z.array(feasibilityQuestionOutputSchema),
+});
+const answerFeasibilityQuestionsInputSchema = feasibilityAnswerBatchInputSchema.extend({
+  ticketId: z.string().min(1),
+}).strict();
+const answerFeasibilityQuestionsOutputSchema = z.object({
+  runIds: z.array(z.string()).describe("One integration run per answer; follow them through the feasibility questions of get_ticket."),
+  dryRun: z.boolean(),
+});
 const getTicketOutputSchema = z.object({
   ticket: compactTicketSchema.extend({
     prUrl: z.string().nullable().describe("URL of the pull request opened for the card, or of the reviewed pull request for a review card; null before publication."),
     prNumber: ticketSchema.shape.prNumber.describe("Number of the reviewed pull request for a review card, null otherwise."),
     reviewedCommitSha: z.string().nullable().describe("Review cards only: pull request head commit read by the latest review pass, or null before that pass prepared its worktree. Compare it with the current head to skip a pull request already reviewed at the same commit."),
     autonomousState: ticketSchema.shape.autonomousState.describe("Progress of the autonomous delivery, or null for a non-autonomous card."),
+    feasibility: feasibilityOutputSchema.describe("Feasibility study of the card: status, verdict and the questions it left open."),
     reviewVerdict: reviewVerdictOutputSchema.nullable().describe("Review cards only: outcome of the latest review pass once every reviewer of that pass completed; null for other cards, before the first pass finishes, and while a newer pass is still running."),
   }),
   questions: z.array(z.object({
@@ -289,6 +321,13 @@ const PUBLIC_TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
   {
+    name: "answer_feasibility_questions",
+    description: "Answers open questions of a card's feasibility study: the answers are integrated into the card description in the background. Send every available answer in one call, with the revision and reportVersion read from get_ticket.",
+    inputSchema: z.toJSONSchema(answerFeasibilityQuestionsInputSchema, { io: "input" }),
+    outputSchema: z.toJSONSchema(answerFeasibilityQuestionsOutputSchema, { io: "output" }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
     name: "get_capacity",
     description: "Returns how many implementation slots this host has and how many are free right now.",
     inputSchema: z.toJSONSchema(getCapacityInputSchema, { io: "input" }),
@@ -382,6 +421,7 @@ export function errorResult(code: string, message: string): McpTextResult {
 function toolError(error: unknown): McpTextResult {
   if (error instanceof TicketOperationError) return errorResult(error.code, error.message);
   if (error instanceof PullRequestListingError) return errorResult("UPSTREAM_ERROR", error.message);
+  if (error instanceof FeasibilityAnswerError) return errorResult(error.status === HTTP_NOT_FOUND ? "NOT_FOUND" : "CONFLICT", error.message);
   return errorResult("INTERNAL_ERROR", "internal server error");
 }
 
@@ -424,8 +464,9 @@ export async function serveStatelessMcp(server: Server, request: Request, parsed
 }
 
 type QuestionAnswerer = Pick<AgentCoordinator, "submitUserComment">;
+type FeasibilityAnswerer = Pick<FeasibilityAnswerManager, "startBatch">;
 
-function createMcpServer(operations: TicketOperations, coordinator: QuestionAnswerer, dryRun: boolean, campaigns: CampaignService | null, readApplicationVersion: () => Promise<ApplicationVersion>, external?: ExternalValidationManager): Server {
+function createMcpServer(operations: TicketOperations, coordinator: QuestionAnswerer, feasibilityAnswers: FeasibilityAnswerer | undefined, dryRun: boolean, campaigns: CampaignService | null, readApplicationVersion: () => Promise<ApplicationVersion>, external?: ExternalValidationManager): Server {
   const tools = campaigns === null ? PUBLIC_TOOLS : [...PUBLIC_TOOLS, ...CAMPAIGN_TOOLS];
   return createToolServer(tools, async (request): Promise<McpTextResult> => {
     const input = request.params.arguments ?? {};
@@ -530,6 +571,13 @@ function createMcpServer(operations: TicketOperations, coordinator: QuestionAnsw
           dryRun,
         });
       }
+      if (request.params.name === "answer_feasibility_questions") {
+        if (feasibilityAnswers === undefined) return errorResult("UNAVAILABLE", "Feasibility answers are unavailable");
+        const parsed = answerFeasibilityQuestionsInputSchema.safeParse(input);
+        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
+        const { ticketId, ...answers } = parsed.data;
+        return toolResult(answerFeasibilityQuestionsOutputSchema, { runIds: feasibilityAnswers.startBatch(ticketId, answers), dryRun });
+      }
       if (request.params.name === "answer_question") {
         const parsed = answerQuestionInputSchema.safeParse(input);
         if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
@@ -567,6 +615,7 @@ export class PublicMcpManager {
     private readonly campaigns: CampaignService | null = null,
     private readonly readApplicationVersion: () => Promise<ApplicationVersion> = createApplicationVersionReader({ sourceRevision: null, cloud: false }),
     private readonly external?: ExternalValidationManager,
+    private readonly feasibilityAnswers?: FeasibilityAnswerer,
   ) {
     this.token = token;
   }
@@ -591,6 +640,6 @@ export class PublicMcpManager {
       return jsonResponse(HTTP_BAD_REQUEST, "only MCP POST requests are accepted");
     }
 
-    return serveStatelessMcp(createMcpServer(this.operations, this.coordinator, this.dryRun, this.campaigns, this.readApplicationVersion, this.external), request);
+    return serveStatelessMcp(createMcpServer(this.operations, this.coordinator, this.feasibilityAnswers, this.dryRun, this.campaigns, this.readApplicationVersion, this.external), request);
   }
 }

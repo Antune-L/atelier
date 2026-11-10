@@ -12,8 +12,9 @@ import {
   ticketBatchOptionsSchema,
   ticketSchema,
   updateTicketSchema,
+  parseTriageReport,
 } from "../shared/schemas.ts";
-import type { Comment, OpenPr, Profile, ProjectInfo, Ticket } from "../shared/schemas.ts";
+import type { Comment, OpenPr, Profile, ProjectInfo, Ticket, TriageVerdict } from "../shared/schemas.ts";
 import { reviewVerdictSummary } from "./agents/reviewPass.ts";
 import type { ReviewVerdictSummary } from "./agents/reviewPass.ts";
 import { remoteAnalysisRefusal } from "./agents/remoteAnalysis.ts";
@@ -175,11 +176,30 @@ export interface TicketPageOf<T> {
 
 export type TicketPage = TicketPageOf<CompactTicket>;
 
+export interface FeasibilitySummary {
+  status: Ticket["triageStatus"];
+  verdict: TriageVerdict | null;
+  summary: string | null;
+  reasons: string[];
+  revision: number;
+  reportVersion: number;
+  questions: Array<{
+    index: number;
+    question: string;
+    recommendedAnswer: string | null;
+    answerStatus: "open" | "running" | "done" | "failed";
+    answer: string | null;
+    runId: string | null;
+    error: string | null;
+  }>;
+}
+
 export interface TicketDetail {
   ticket: CompactTicket & Pick<Ticket, "prUrl" | "prNumber"> & {
     autonomousState: Ticket["autonomousState"] | null;
     reviewedCommitSha: string | null;
     reviewVerdict: ReviewVerdictSummary | null;
+    feasibility: FeasibilitySummary;
   };
   comments: Comment[];
 }
@@ -318,6 +338,31 @@ function compactTicket(ticket: Ticket): CompactTicket {
     reviewOutcome: ticket.reviewOutcome ?? null,
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
+  };
+}
+
+/** Study state of a card for external readers; unapproved remote content stays withheld. */
+function feasibilitySummary(ticket: Ticket): FeasibilitySummary {
+  const base = { status: ticket.triageStatus, verdict: ticket.triageVerdict, revision: ticket.feasibilityRevision, reportVersion: ticket.feasibilityReportVersion };
+  if (needsRemoteApproval(ticket)) return { ...base, summary: null, reasons: [], questions: [] };
+  const report = ticket.triageStatus === "done" ? parseTriageReport(ticket.triageReport) : null;
+  const failure = ticket.triageStatus === "failed" ? ticket.triageReport : null;
+  return {
+    ...base,
+    summary: report?.summary ?? failure,
+    reasons: report?.reasons ?? [],
+    questions: (report?.questions ?? []).map((question, index) => {
+      const run = ticket.feasibilityAnswers.find((candidate) => candidate.reportVersion === ticket.feasibilityReportVersion && candidate.questionIndex === index);
+      return {
+        index,
+        question: question.question,
+        recommendedAnswer: question.recommendedAnswer,
+        answerStatus: run?.status ?? "open",
+        answer: run?.answer ?? null,
+        runId: run?.id ?? null,
+        error: run?.error ?? null,
+      };
+    }),
   };
 }
 
@@ -463,6 +508,7 @@ export class TicketOperations {
         autonomousState: ticket.autonomousState ?? null,
         reviewedCommitSha: reviewPass?.reviewedCommitSha ?? null,
         reviewVerdict: reviewVerdictSummary(reviewPass),
+        feasibility: feasibilitySummary(ticket),
       },
       comments: needsRemoteApproval(ticket) ? [] : this.deps.store.listComments(ticketId),
     };

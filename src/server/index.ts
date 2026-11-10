@@ -463,6 +463,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
         cloud: isCloudHost(),
       }),
       externalValidation,
+      feasibilityAnswerManager,
     );
 
   await opts.beforeRecovery?.();

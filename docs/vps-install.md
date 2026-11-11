@@ -14,7 +14,7 @@ Two phases:
 - The interface is only reachable through a Unix socket that you open with an SSH tunnel. No port is published. To open it from any device instead, see [vps-remote-access.md](./vps-remote-access.md).
 - This host (`KANBAN_HOST_ROLE=cloud`) offers the same delivery options as the Mac: auto-merge, direct push, autonomous merge delivery and the re-merge after a conflict resolution. An agent that runs unattended can therefore merge or push to the base branch under the owner's GitHub identity with no human review. The owner accepted this risk on 2026-10-31.
 - Only one host runs quality validations and Devin cards. Set this in **Settings → Agents par défaut → Validation qualité sur ce poste** on each host.
-- In Phase B, the Coolify token lives in the preview broker, under the `kanban-preview` user. The broker only creates Dockerfile previews from its own configuration and only touches resources it created. A root helper cleans leftovers after checking the broker's registry.
+- In Phase B, the Coolify token lives in the preview broker, under the `kanban-preview` user. The broker only creates previews of the repositories and recipes declared in its own configuration (Dockerfile, or Docker Compose behind an authenticated gateway) and only touches resources it created. A root helper cleans leftovers after checking the broker's registry.
 
 Not covered: agents on the Mac can still reach the VPS through your own SSH key. Kernel, Docker or Coolify vulnerabilities remain a residual risk.
 
@@ -284,7 +284,7 @@ git -C ~/kanban-admin show "$sha:deploy/preview-broker/config.example.json" | su
 sudo nano /etc/kanban-preview/config.json
 ```
 
-`sha` is the reviewed commit from A3. Fill in the Coolify URL, token, server, project, environment name, preview domain and, for each project, the repository and its Coolify source (`github_app`, `deploy_key` or `public` with its uuid). The project key is only a label: the broker matches projects by repository. The broker copies are only updated when you run the `for` loop again with a reviewed `sha`, never by a release upgrade. Install `config.example.json` only once: rerunning that line overwrites your configuration.
+`sha` is the reviewed commit from A3. Fill in the Coolify URL, token, server, project, environment name, preview domain and, for each project, the repository, its Coolify source (`github_app`, `deploy_key` or `public` with its uuid) and its recipe ([B7](#b7-opening-previews-to-another-repository)). The project key is only a label: the broker matches projects by repository. The broker copies are only updated when you run the `for` loop again with a reviewed `sha`, never by a release upgrade. Install `config.example.json` only once: rerunning that line overwrites your configuration.
 
 ### B2. Units
 
@@ -308,7 +308,7 @@ Coolify's API IP allowlist, if set, must include the VPS public address and the 
 
 ### B3. Preview settings on the VPS board
 
-In **Settings → Coolify**, fill in the same Coolify URL, server, project, environment and domain as the broker, plus the preview username and password. Leave the token and SSH alias empty: the broker holds the token and performs the cleanup. Enable previews for the project with the recipe `.coolify/preview.json` (the Dockerfile recipe). Compose recipes are refused on this host.
+In **Settings → Coolify**, fill in the same Coolify URL, server, project, environment and domain as the broker, plus the preview username and password. Leave the token and SSH alias empty: the broker holds the token and performs the cleanup. Enable previews for the project with the recipe `.coolify/preview.json`. Its build pack must match the project's entry in the broker configuration: the broker refuses a Compose request for a Dockerfile project and the reverse.
 
 ### B4. Make the VPS the quality owner
 
@@ -332,6 +332,49 @@ The second command caches the pinned Playwright MCP for the `kanban` user, becau
 - A Devin card gets a ready preview, then the preview is stopped and cleaned completely.
 - `sudo cat /var/lib/kanban-preview/registry.json` lists the preview with `deletedAt` set after cleanup.
 - `sudo -u kanban cat /etc/kanban-preview/config.json` is refused.
+
+### B7. Opening previews to another repository
+
+The broker refuses any repository missing from the `projects` section of `/etc/kanban-preview/config.json`. Opening a new repository (an external validation from the Orchestrator, for example) requires no code change:
+
+1. **Recipe in the repository.** The repository holds its preview recipe (`.coolify/preview.json` by default, see [coolify-previews.md](./coolify-previews.md)) on the branches to preview.
+2. **GitHub App access.** For a private repository with a `github_app` source, add the repository to the installation of the GitHub App used by Coolify (on GitHub, in the app installation's repository access). Coolify only lists the repositories the installation can see.
+3. **Broker entry.** Add an entry under `projects` with `sudo nano /etc/kanban-preview/config.json`. The key is a free label; the broker matches requests by `repository`. Copy the recipe's `buildContext` and `port` exactly. For a Dockerfile recipe, set `dockerfile` (`buildPack` can be omitted, it defaults to `dockerfile`). For a Docker Compose recipe, set `buildPack: "dockercompose"`, `composeFile` and `serviceName` (the authenticated gateway), and use the gateway port:
+
+   ```json
+   "orchestrateur": {
+     "repository": "Antune-L/orchestrateur",
+     "host": "github.com",
+     "source": { "type": "github_app", "uuid": "COOLIFY_GITHUB_APP_UUID" },
+     "buildPack": "dockercompose",
+     "composeFile": ".coolify/docker-compose.preview.yml",
+     "serviceName": "preview-gateway",
+     "buildContext": ".",
+     "port": 8080
+   }
+   ```
+
+4. **Restart.** The broker reads its configuration only at startup: `sudo systemctl restart kanban-preview-broker`, then `sudo journalctl -u kanban-preview-broker -n 5 --no-pager` must list the new key in `projects`.
+
+`/opt/kanban-preview/broker.ts` is a separate copy, never updated by a release upgrade. After a commit changes `deploy/preview-broker/`, reinstall it from the reviewed commit (the `for` loop of B1, or `sudo kanban-bootstrap --sha <sha> --with-previews`), then restart the broker.
+
+What the broker enforces for each recipe:
+
+- **Both:** declared repository, branch and 40-character commit validated, broker-owned name (`kanban-preview-<uuid>`, or `kanban-preview-external-<32 hex>` for an external validation), domain `https://<name>.<domainBase>` set by the broker, no custom Docker run options, automatic and preview deployments off.
+- **Dockerfile:** Coolify's native HTTP Basic authentication at creation (password of at most 31 bytes).
+- **Docker Compose:** the Compose file and gateway service come from the broker entry, never from the request. Every environment update must carry the gateway username and its bcrypt hash, and the broker refuses to deploy before it has received them.
+
+Docker Compose gives the repository more power than a Dockerfile: Coolify 4 lets a Compose file mount host paths, including the Docker socket, and the broker cannot read the file before Coolify deploys it. Declare a Compose repository only when everyone who can push a branch to it is trusted with root on the VPS, and review changes to its Compose file. The gateway's protection also depends on that file.
+
+Pitfalls met so far:
+
+| Symptom | Cause and fix |
+| --- | --- |
+| `Invalid ownership marker.` (HTTP 400) on an external validation | The installed broker predates the `kanban-preview-external-` names. Reinstall `/opt/kanban-preview/broker.ts` from a commit that includes them and restart the broker. |
+| `Only Dockerfile previews are allowed on this host.` | Same: an older broker refused every Compose recipe. Reinstall it, then declare the project with `buildPack: "dockercompose"`. |
+| `This repository is configured for … previews on this host.` | The recipe in the repository and the broker entry disagree (build pack or Compose file). Align the broker entry with the recipe and restart the broker. |
+| `The repository is not configured for previews.` | No `projects` entry for this repository, or the broker was not restarted after adding it. |
+| « Aucune connexion GitHub Coolify installée n’a accès à ce dépôt privé » | The GitHub App installation used by Coolify cannot see the repository, or its uuid is not declared in any broker entry. Add the repository to the installation (step 2), check the uuid in the entry, then check again from the board. |
 
 ## Autonomous campaigns
 

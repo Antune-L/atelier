@@ -19,11 +19,18 @@ const CLEANUP_PATH = "/kanban/cleanup";
 const DELETE_QUERY = "delete_configurations=true&delete_volumes=true&docker_cleanup=false&delete_connected_networks=true";
 const UUID_PATTERN = /^[a-z0-9]{24}$/;
 const RESOURCE_UUID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-const MARKER_PATTERN = /^kanban-preview-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const MARKER_PATTERN = /^kanban-preview-(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|external-[0-9a-f]{32})$/;
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 const BRANCH_PATTERN = /^[A-Za-z0-9._/-]{1,200}$/;
 const ENV_KEY_PATTERN = /^[A-Z_][A-Z0-9_]{0,99}$/;
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const COMPOSE_SERVICE_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$/;
+const BCRYPT_HASH_PATTERN = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
+const GATEWAY_USERNAME_ENV = "KANBAN_PREVIEW_AUTH_USERNAME";
+const GATEWAY_HASH_ENV = "KANBAN_PREVIEW_AUTH_HASH";
+const GATEWAY_DISABLED_ENV = "KANBAN_PREVIEW_AUTH_DISABLED";
+const GATEWAY_DISABLED_VALUE = "disabled";
+const RESERVED_ENV_KEYS = [GATEWAY_USERNAME_ENV, GATEWAY_HASH_ENV, GATEWAY_DISABLED_ENV];
 const CREATE_ENDPOINTS: Record<SourceType, string> = {
   public: "/applications/public",
   github_app: "/applications/private-github-app",
@@ -32,11 +39,13 @@ const CREATE_ENDPOINTS: Record<SourceType, string> = {
 
 type SourceType = "public" | "github_app" | "deploy_key";
 
+type ProjectRecipe = { buildPack: "dockerfile"; dockerfile: string } | { buildPack: "dockercompose"; composeFile: string; serviceName: string };
+
 interface ProjectConfig {
   repository: string;
   host: string;
   source: { type: SourceType; uuid?: string };
-  dockerfile: string;
+  recipe: ProjectRecipe;
   buildContext: string;
   port: number;
 }
@@ -53,6 +62,7 @@ interface AppEntry {
   project: string;
   createdAt: number;
   deletedAt: number | null;
+  authenticated: boolean;
   deployments: string[];
 }
 
@@ -85,6 +95,21 @@ function requireString(value: unknown, label: string, pattern?: RegExp): string 
   return value;
 }
 
+function isRelativePath(value: unknown): value is string {
+  return typeof value === "string" && value !== "" && !value.startsWith("/") && !value.includes("\\") && !value.split("/").includes("..");
+}
+
+function loadRecipe(key: string, value: Record<string, unknown>): ProjectRecipe {
+  const buildPack = value.buildPack ?? "dockerfile";
+  if (buildPack === "dockerfile") {
+    if (typeof value.dockerfile !== "string") throw new Error(`Project ${key} requires a dockerfile.`);
+    return { buildPack, dockerfile: value.dockerfile };
+  }
+  if (buildPack !== "dockercompose") throw new Error(`Invalid buildPack for project ${key}.`);
+  if (!isRelativePath(value.composeFile) || typeof value.serviceName !== "string" || !COMPOSE_SERVICE_NAME_PATTERN.test(value.serviceName)) throw new Error(`Project ${key} requires a relative composeFile and a valid serviceName.`);
+  return { buildPack, composeFile: value.composeFile, serviceName: value.serviceName };
+}
+
 function loadConfig(path: string): BrokerConfig {
   const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
   if (!isRecord(raw) || !isRecord(raw.coolify) || !isRecord(raw.projects) || typeof raw.domainBase !== "string") throw new Error("Invalid broker configuration.");
@@ -99,9 +124,9 @@ function loadConfig(path: string): BrokerConfig {
     const sourceType = value.source.type;
     if (sourceType !== "public" && sourceType !== "github_app" && sourceType !== "deploy_key") throw new Error(`Invalid source for project ${key}.`);
     if (sourceType !== "public" && typeof value.source.uuid !== "string") throw new Error(`Project ${key} requires a source uuid.`);
-    if (typeof value.repository !== "string" || !REPOSITORY_PATTERN.test(value.repository) || typeof value.host !== "string" || typeof value.dockerfile !== "string" || typeof value.buildContext !== "string" || typeof value.port !== "number") throw new Error(`Incomplete project ${key}.`);
+    if (typeof value.repository !== "string" || !REPOSITORY_PATTERN.test(value.repository) || typeof value.host !== "string" || typeof value.buildContext !== "string" || typeof value.port !== "number") throw new Error(`Incomplete project ${key}.`);
     projects[key] = {
-      repository: value.repository, host: value.host, dockerfile: value.dockerfile, buildContext: value.buildContext, port: value.port,
+      repository: value.repository, host: value.host, recipe: loadRecipe(key, value), buildContext: value.buildContext, port: value.port,
       source: sourceType === "public" ? { type: "public" } : { type: sourceType, uuid: String(value.source.uuid) },
     };
   }
@@ -133,6 +158,7 @@ function readRegistry(): Registry {
     apps[uuid] = {
       marker: value.marker, project: value.project, createdAt: Number(value.createdAt ?? 0),
       deletedAt: typeof value.deletedAt === "number" ? value.deletedAt : null,
+      authenticated: typeof value.authenticated === "boolean" ? value.authenticated : config.projects[value.project]?.recipe.buildPack === "dockerfile",
       deployments: value.deployments.filter((entry): entry is string => typeof entry === "string"),
     };
   }
@@ -156,6 +182,16 @@ function ownedApp(uuid: string): AppEntry {
   const entry = readRegistry().apps[uuid];
   if (!entry) throw new PolicyError(HTTP_FORBIDDEN, "The application is not owned by the preview broker.");
   return entry;
+}
+
+function ownedRecipe(entry: AppEntry): ProjectRecipe {
+  const project = config.projects[entry.project];
+  if (!project) throw new PolicyError(HTTP_FORBIDDEN, "The preview project is no longer configured on this host.");
+  return project.recipe;
+}
+
+function previewUrl(marker: string): string {
+  return `https://${marker}.${config.domainBase}`;
 }
 
 function ownedDeployment(uuid: string): string {
@@ -214,11 +250,24 @@ async function configuredEnvironmentUuid(): Promise<string> {
   return match.uuid;
 }
 
+function dockerfilePayload(body: Record<string, unknown>, recipe: { dockerfile: string }): Record<string, unknown> {
+  if (body.build_pack !== "dockerfile" || body.docker_compose_location !== undefined || body.docker_compose_domains !== undefined) throw new PolicyError(HTTP_FORBIDDEN, "This repository is configured for Dockerfile previews on this host.");
+  if (body.is_http_basic_auth_enabled !== true) throw new PolicyError(HTTP_FORBIDDEN, "Preview authentication is required.");
+  const username = requireString(body.http_basic_auth_username, "preview username");
+  const password = requireString(body.http_basic_auth_password, "preview password");
+  if (Buffer.byteLength(password, "utf8") > MAX_BASIC_AUTH_BYTES) throw new PolicyError(HTTP_BAD_REQUEST, "The preview password is too long.");
+  return { dockerfile_location: `/${recipe.dockerfile}`, is_http_basic_auth_enabled: true, http_basic_auth_username: username, http_basic_auth_password: password };
+}
+
+function composePayload(body: Record<string, unknown>, recipe: { composeFile: string; serviceName: string }, marker: string, port: number): Record<string, unknown> {
+  if (body.docker_compose_location !== `/${recipe.composeFile}` || body.dockerfile_location !== undefined || body.is_http_basic_auth_enabled !== undefined) throw new PolicyError(HTTP_FORBIDDEN, `This repository is configured for the Docker Compose recipe ${recipe.composeFile} on this host.`);
+  return { docker_compose_location: `/${recipe.composeFile}`, docker_compose_domains: [{ name: recipe.serviceName, domain: `${previewUrl(marker)}:${port}` }] };
+}
+
 async function createApplication(body: unknown): Promise<CoolifyResult> {
   if (!isRecord(body)) throw new PolicyError(HTTP_BAD_REQUEST, "Invalid application payload.");
   const marker = requireString(body.name, "ownership marker", MARKER_PATTERN);
   if (body.description !== marker) throw new PolicyError(HTTP_BAD_REQUEST, "The application description must be its ownership marker.");
-  if (body.build_pack !== "dockerfile" || body.docker_compose_location !== undefined || body.docker_compose_domains !== undefined) throw new PolicyError(HTTP_FORBIDDEN, "Only Dockerfile previews are allowed on this host.");
   if (body.custom_docker_run_options !== undefined) throw new PolicyError(HTTP_FORBIDDEN, "Custom Docker run options are not allowed.");
   if (body.server_uuid !== config.coolify.serverUuid || body.project_uuid !== config.coolify.projectUuid) throw new PolicyError(HTTP_FORBIDDEN, "The preview settings do not match the broker configuration.");
   const branch = requireString(body.git_branch, "branch", BRANCH_PATTERN);
@@ -226,10 +275,7 @@ async function createApplication(body: unknown): Promise<CoolifyResult> {
   const projectEntry = configuredProject(requireString(body.git_repository, "repository"));
   if (!projectEntry) throw new PolicyError(HTTP_FORBIDDEN, "The repository is not configured for previews.");
   const [projectKey, project] = projectEntry;
-  if (body.is_http_basic_auth_enabled !== true) throw new PolicyError(HTTP_FORBIDDEN, "Preview authentication is required.");
-  const username = requireString(body.http_basic_auth_username, "preview username");
-  const password = requireString(body.http_basic_auth_password, "preview password");
-  if (Buffer.byteLength(password, "utf8") > MAX_BASIC_AUTH_BYTES) throw new PolicyError(HTTP_BAD_REQUEST, "The preview password is too long.");
+  const recipePayload = project.recipe.buildPack === "dockerfile" ? dockerfilePayload(body, project.recipe) : composePayload(body, project.recipe, marker, project.port);
   const registry = readRegistry();
   const active = Object.values(registry.apps).filter((entry) => entry.deletedAt === null).length + Object.keys(registry.intents).length;
   if (active >= (config.maxActivePreviews ?? DEFAULT_MAX_ACTIVE_PREVIEWS)) throw new PolicyError(HTTP_TOO_MANY, "Too many active previews.");
@@ -239,10 +285,10 @@ async function createApplication(body: unknown): Promise<CoolifyResult> {
     server_uuid: config.coolify.serverUuid, project_uuid: config.coolify.projectUuid,
     environment_uuid: environmentUuid, environment_name: config.coolify.environmentName,
     git_repository: sourceRepository(project), git_branch: branch, git_commit_sha: commit,
-    build_pack: "dockerfile", dockerfile_location: `/${project.dockerfile}`, ports_exposes: String(project.port),
+    build_pack: "dockerfile", ports_exposes: String(project.port),
     base_directory: project.buildContext === "." ? "/" : `/${project.buildContext}`,
     instant_deploy: false, is_auto_deploy_enabled: false, is_preview_deployments_enabled: false, autogenerate_domain: false,
-    is_http_basic_auth_enabled: true, http_basic_auth_username: username, http_basic_auth_password: password,
+    ...recipePayload,
     ...(config.coolify.destinationUuid ? { destination_uuid: config.coolify.destinationUuid } : {}),
     ...(project.source.type === "github_app" ? { github_app_uuid: project.source.uuid } : {}),
     ...(project.source.type === "deploy_key" ? { private_key_uuid: project.source.uuid } : {}),
@@ -251,7 +297,7 @@ async function createApplication(body: unknown): Promise<CoolifyResult> {
   const result = await coolify("POST", CREATE_ENDPOINTS[project.source.type], payload);
   const uuid = isRecord(result.body) && typeof result.body.uuid === "string" ? result.body.uuid : null;
   mutateRegistry((current) => {
-    if (uuid !== null) current.apps[uuid] = { marker, project: projectKey, createdAt: Date.now(), deletedAt: null, deployments: [] };
+    if (uuid !== null) current.apps[uuid] = { marker, project: projectKey, createdAt: Date.now(), deletedAt: null, authenticated: project.recipe.buildPack === "dockerfile", deployments: [] };
     if (uuid !== null || result.status === HTTP_BAD_REQUEST || result.status === HTTP_UNPROCESSABLE) delete current.intents[marker];
   });
   return result;
@@ -270,7 +316,8 @@ async function listApplications(): Promise<CoolifyResult> {
       if (current.intents[marker] === undefined || current.apps[app.uuid]) continue;
       const projectEntry = typeof app.git_repository === "string" ? configuredProject(app.git_repository) : undefined;
       const project = projectEntry?.[0] ?? "unknown";
-      current.apps[app.uuid] = { marker, project, createdAt: Date.now(), deletedAt: null, deployments: [] };
+      const authenticated = projectEntry?.[1].recipe.buildPack === "dockerfile";
+      current.apps[app.uuid] = { marker, project, createdAt: Date.now(), deletedAt: null, authenticated, deployments: [] };
       delete current.intents[marker];
     }
   });
@@ -280,27 +327,48 @@ async function listApplications(): Promise<CoolifyResult> {
 function updateApplication(uuid: string, body: unknown): Promise<CoolifyResult> {
   const entry = ownedApp(uuid);
   if (!isRecord(body)) throw new PolicyError(HTTP_BAD_REQUEST, "Invalid application update.");
+  const recipe = ownedRecipe(entry);
   const allowed: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body)) {
-    if (key === "domains") {
-      if (value !== `https://${entry.marker}.${config.domainBase}`) throw new PolicyError(HTTP_FORBIDDEN, "The preview domain does not match the broker configuration.");
+    if (key === "domains" && recipe.buildPack === "dockerfile") {
+      if (value !== previewUrl(entry.marker)) throw new PolicyError(HTTP_FORBIDDEN, "The preview domain does not match the broker configuration.");
       allowed.domains = value;
     } else if (key === "git_commit_sha") allowed.git_commit_sha = requireString(value, "commit", COMMIT_PATTERN);
-    else if ((key === "is_auto_deploy_enabled" || key === "is_preview_deployments_enabled") && value === false) allowed[key] = false;
+    else if ((key === "is_auto_deploy_enabled" || key === "is_preview_deployments_enabled" || key === "instant_deploy") && value === false) allowed[key] = false;
+    else if (key === "build_pack" && value === recipe.buildPack) allowed.build_pack = value;
+    else if (key === "docker_compose_location" && recipe.buildPack === "dockercompose" && value === `/${recipe.composeFile}`) allowed.docker_compose_location = value;
     else throw new PolicyError(HTTP_FORBIDDEN, `The application field ${key} cannot be changed through the broker.`);
   }
   return coolify("PATCH", `/applications/${encodeURIComponent(uuid)}`, allowed);
 }
 
-function updateEnvironment(uuid: string, body: unknown): Promise<CoolifyResult> {
-  ownedApp(uuid);
+function requireGatewayAuthentication(data: { key: string; value: string }[]): void {
+  const value = (key: string) => data.find((entry) => entry.key === key)?.value;
+  const username = value(GATEWAY_USERNAME_ENV);
+  if (!username || username === GATEWAY_DISABLED_VALUE || !BCRYPT_HASH_PATTERN.test(value(GATEWAY_HASH_ENV) ?? "") || value(GATEWAY_DISABLED_ENV) !== undefined) {
+    throw new PolicyError(HTTP_FORBIDDEN, "Docker Compose previews require the gateway username and bcrypt hash in every environment update.");
+  }
+}
+
+async function updateEnvironment(uuid: string, body: unknown): Promise<CoolifyResult> {
+  const recipe = ownedRecipe(ownedApp(uuid));
   if (!isRecord(body) || !Array.isArray(body.data)) throw new PolicyError(HTTP_BAD_REQUEST, "Invalid environment update.");
   const data = body.data.map((entry) => {
     if (!isRecord(entry) || typeof entry.value !== "string") throw new PolicyError(HTTP_BAD_REQUEST, "Invalid environment entry.");
     const key = requireString(entry.key, "environment key", ENV_KEY_PATTERN);
     return { key, value: entry.value, is_preview: false, is_buildtime: false, is_runtime: true, is_literal: true, is_multiline: false, is_shown_once: entry.is_shown_once === true };
   });
-  return coolify("PATCH", `/applications/${encodeURIComponent(uuid)}/envs/bulk`, { data });
+  if (new Set(data.map((entry) => entry.key)).size !== data.length) throw new PolicyError(HTTP_BAD_REQUEST, "Duplicate environment keys.");
+  if (recipe.buildPack === "dockercompose") requireGatewayAuthentication(data);
+  else if (data.some((entry) => RESERVED_ENV_KEYS.includes(entry.key))) throw new PolicyError(HTTP_FORBIDDEN, "Preview authentication variables are reserved for Docker Compose gateways.");
+  const result = await coolify("PATCH", `/applications/${encodeURIComponent(uuid)}/envs/bulk`, { data });
+  if (recipe.buildPack === "dockercompose" && result.status >= 200 && result.status < 300) {
+    mutateRegistry((registry) => {
+      const entry = registry.apps[uuid];
+      if (entry) entry.authenticated = true;
+    });
+  }
+  return result;
 }
 
 async function deleteApplication(uuid: string): Promise<CoolifyResult> {
@@ -318,7 +386,9 @@ async function deleteApplication(uuid: string): Promise<CoolifyResult> {
 async function deploy(body: unknown): Promise<CoolifyResult> {
   if (!isRecord(body)) throw new PolicyError(HTTP_BAD_REQUEST, "Invalid deployment request.");
   const uuid = requireString(body.uuid, "application", RESOURCE_UUID_PATTERN);
-  if (ownedApp(uuid).deletedAt !== null) throw new PolicyError(HTTP_FORBIDDEN, "The application was deleted.");
+  const entry = ownedApp(uuid);
+  if (entry.deletedAt !== null) throw new PolicyError(HTTP_FORBIDDEN, "The application was deleted.");
+  if (!entry.authenticated) throw new PolicyError(HTTP_FORBIDDEN, "The preview authentication is not configured yet.");
   const result = await coolify("POST", "/deploy", { uuid, force: false });
   if (isRecord(result.body)) recordDeployments(uuid, result.body.deployments);
   return result;

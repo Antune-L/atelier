@@ -4,6 +4,10 @@ import type { ApplicationVersion } from "../shared/applicationVersion.ts";
 import { RELEASE_REPOSITORY } from "../shared/desktopUpdate.ts";
 import type { DesktopUpdateController } from "../shared/desktopUpdate.ts";
 import { providerVersionSchema } from "../shared/providerUpdates.ts";
+import type { AppUpdateTarget } from "../shared/providerUpdates.ts";
+
+import { CLAUDE_SDK_VERSION } from "./system/claudeBinary.ts";
+import { CODEX_SDK_VERSION } from "./system/codexBinary.ts";
 
 const RELEASE_PATH = /^\/opt\/kanban\/releases\/([a-f0-9]{40})$/;
 const REVISION = /^[a-f0-9]{40}$/;
@@ -30,6 +34,7 @@ export function createApplicationVersionReader(options: {
   desktopVersion?: string;
   desktopUpdates?: DesktopUpdateController;
   cloud: boolean;
+  readCloudTarget?: () => Promise<AppUpdateTarget>;
 }): () => Promise<ApplicationVersion> {
   const desktop = options.desktopVersion !== undefined;
   let installed = options.sourceRevision;
@@ -45,17 +50,28 @@ export function createApplicationVersionReader(options: {
     installedUnavailableReason: installed === null ? "installed_metadata_unavailable" : null,
     targetUnavailableReason: "target_not_configured",
   };
-  if (!desktop) {
-    if (options.cloud) base.targetUnavailableReason = "target_authorization_required";
-    return async () => base;
+  const unavailable: ApplicationVersion = { ...base, targetUnavailableReason: "target_metadata_unavailable" };
+  if (desktop) {
+    return async () => {
+      try {
+        const status = await options.desktopUpdates?.check();
+        const available = status?.target?.version ?? null;
+        return available === null ? unavailable : { ...base, available, targetUnavailableReason: null };
+      } catch {
+        return unavailable;
+      }
+    };
   }
+  const readCloudTarget = options.readCloudTarget;
+  if (!options.cloud) return async () => base;
+  if (!readCloudTarget) return async () => unavailable;
   return async () => {
     try {
-      const status = await options.desktopUpdates?.check();
-      const available = status?.target?.version ?? null;
-      return { ...base, available, targetUnavailableReason: available === null ? "target_metadata_unavailable" : null };
+      const target = await readCloudTarget();
+      const updaterAccepts = target.providers.claude === CLAUDE_SDK_VERSION && target.providers.codex === CODEX_SDK_VERSION;
+      return updaterAccepts ? { ...base, available: target.id, targetUnavailableReason: null } : unavailable;
     } catch {
-      return { ...base, targetUnavailableReason: "target_metadata_unavailable" };
+      return unavailable;
     }
   };
 }

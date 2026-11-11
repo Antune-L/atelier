@@ -13,7 +13,7 @@ import { CLAUDE_SDK_VERSION } from "./system/claudeBinary.ts";
 import { CODEX_SDK_VERSION } from "./system/codexBinary.ts";
 import { browseFolders } from "./system/folderBrowser.ts";
 import { ProviderAdoptionService } from "./system/providerAdoption.ts";
-import { ProviderUpdateService, readSourceUpdateTarget } from "./system/providerUpdates.ts";
+import { ProviderUpdateService, readCachedSourceUpdateTarget } from "./system/providerUpdates.ts";
 import { KeyedMutex } from "./mutex.ts";
 import type { SourceUpdateAdmission } from "./system/sourceUpdateAdmission.ts";
 import { autonomousResumeSchema } from "../shared/autonomous.ts";
@@ -974,17 +974,8 @@ export function createApiRoutes(deps: RouteDeps) {
   const updateMutex = deps.repoMutex ?? new KeyedMutex();
   const providerUpdates = new ProviderUpdateService();
   const adoption = new ProviderAdoptionService(store, deps.system, deps.resourcesRoot ?? deps.projectRoot);
-  let sourceTarget: AppUpdateTarget | null = null;
-  let sourceTargetAt = 0;
-  let sourceTargetPending: Promise<AppUpdateTarget> | null = null;
   let releaseVpsMaintenance: (() => void) | null = null;
   let vpsMaintenanceAttempt: string | null = null;
-  async function getSourceTarget(refresh: boolean): Promise<AppUpdateTarget> {
-    if (sourceTargetPending) return sourceTargetPending;
-    if (!refresh && sourceTarget && Date.now() - sourceTargetAt < 300_000) return sourceTarget;
-    sourceTargetPending = readSourceUpdateTarget().then((target) => { sourceTarget = target; sourceTargetAt = Date.now(); return target; }).finally(() => { sourceTargetPending = null; });
-    return sourceTargetPending;
-  }
 
   const ticketOperations = createTicketOperations({ store, hub, lifecycle, slots, feasibility: deps.feasibility, isMaintenance: () => deps.system.sourceUpdateAdmission.isUpdating });
   const quotaService = deps.quota ?? new ProviderQuotaService({
@@ -1078,7 +1069,7 @@ export function createApiRoutes(deps: RouteDeps) {
         } else if (deps.repoRoot && deps.onRequestUpdate) {
           host = "source";
           message = "La mise à jour installe le graphe verrouillé de la version de l'application.";
-          if (!system.dryRun) { target = await getSourceTarget(refresh); available = true; }
+          if (!system.dryRun) { target = await readCachedSourceUpdateTarget(refresh); available = true; }
         } else if (deps.desktopUpdates) {
           host = "mac";
           if (!system.dryRun) {
@@ -2279,8 +2270,9 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!approved.success) return jsonError(set, HTTP_BAD_REQUEST, "Invalid source update target.");
       if (request.headers.get("x-kanban-update") !== "confirm") return jsonError(set, 403, "Explicit source installation confirmation is required.");
       if (system.dryRun) return jsonError(set, HTTP_CONFLICT, "Source installation is disabled in simulation.");
+      let sourceTarget: AppUpdateTarget | null = null;
       try {
-        sourceTarget = await getSourceTarget(true);
+        sourceTarget = await readCachedSourceUpdateTarget(true);
         if (approved.data.target && sourceTarget.id !== approved.data.target) throw new Error("Main advanced beyond the confirmed revision.");
         approved.data.target = sourceTarget.id;
         const providerChange = sourceTarget.providers.claude !== CLAUDE_SDK_VERSION || sourceTarget.providers.codex !== CODEX_SDK_VERSION;

@@ -70,6 +70,7 @@ import { ProviderQuotaService } from "./quota/quotaService.ts";
 import { configureClaudeProvisionDir, ensureClaudeBinary } from "./system/claudeBinary.ts";
 import { createSystemAdapter } from "./system/index.ts";
 import { configureGithubAccountsRoot, setGithubProjectSource } from "./system/github/accountEnv.ts";
+import { readCachedSourceUpdateTarget } from "./system/providerUpdates.ts";
 import { redactSecrets } from "./system/secretRedaction.ts";
 import { createProjectPrLister } from "./reviewTickets.ts";
 import { createTicketOperations } from "./ticketOperations.ts";
@@ -461,6 +462,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
         desktopVersion: opts.desktopVersion,
         desktopUpdates: opts.desktopUpdates,
         cloud: isCloudHost(),
+        readCloudTarget: isCloudHost() && !system.dryRun ? () => readCachedSourceUpdateTarget() : undefined,
       }),
       externalValidation,
       feasibilityAnswerManager,

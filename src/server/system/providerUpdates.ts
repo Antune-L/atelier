@@ -42,10 +42,22 @@ export async function readBoundedPublicText(url: string, maxBytes = MAX_BODY_BYT
   return Buffer.concat(chunks).toString("utf8");
 }
 
-export async function readSourceUpdateTarget(): Promise<AppUpdateTarget> {
+async function readSourceUpdateTarget(): Promise<AppUpdateTarget> {
   const commit = commitDocument.parse(JSON.parse(await readBoundedPublicText("https://api.github.com/repos/Antune-L/atelier/commits/main")));
   const lock = await readBoundedPublicText(`https://raw.githubusercontent.com/Antune-L/atelier/${commit.sha}/bun.lock`);
   return { id: commit.sha, version: commit.sha.slice(0, 7), providers: lockedProviderVersions(lock) };
+}
+
+let cachedSourceTarget: { target: AppUpdateTarget; checkedAt: number } | null = null;
+let pendingSourceTarget: Promise<AppUpdateTarget> | null = null;
+
+export function readCachedSourceUpdateTarget(refresh = false): Promise<AppUpdateTarget> {
+  if (pendingSourceTarget) return pendingSourceTarget;
+  if (!refresh && cachedSourceTarget && Date.now() - cachedSourceTarget.checkedAt < CACHE_MS) return Promise.resolve(cachedSourceTarget.target);
+  pendingSourceTarget = readSourceUpdateTarget()
+    .then((target) => { cachedSourceTarget = { target, checkedAt: Date.now() }; return target; })
+    .finally(() => { pendingSourceTarget = null; });
+  return pendingSourceTarget;
 }
 
 export class ProviderUpdateService {

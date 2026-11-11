@@ -328,6 +328,7 @@ export interface SystemAdapter {
   readPreviewSource?(repoPath: string, prUrl: string, recipePath: string): Promise<{ revision: string; branch: string; repository: string; host?: string; visibility?: "public" | "private"; recipe: unknown }>;
   readPreviewBranchSource?(repoPath: string, branch: string, recipePath: string): Promise<{ revision: string; branch: string; repository: string; host?: string; visibility?: "public" | "private"; recipe: unknown }>;
   inspectPreviewReadiness?(repoPath: string, branch: string, recipePath: string): Promise<PreviewReadiness>;
+  previewCreationUnresolved?(ownershipMarker: string): Promise<boolean>;
   confirmPreviewCleanup?(preview: PreviewRecord, options: { sshHostAlias: string | null; expectedServerAddress: string | null; removeOwnedResources: boolean; deploymentUuids: string[] }): Promise<{ complete: boolean; reason: string | null; retryable?: boolean }>;
   probePreviewHealth?(url: string, healthPath: string, auth: { username: string; password: string }): Promise<boolean>;
   probePreviewWebSocket?(url: string, path: string, auth: { username: string; password: string }): Promise<boolean>;

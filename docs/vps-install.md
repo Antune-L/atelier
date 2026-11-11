@@ -374,6 +374,7 @@ Pitfalls met so far:
 | `Only Dockerfile previews are allowed on this host.` | Same: an older broker refused every Compose recipe. Reinstall it, then declare the project with `buildPack: "dockercompose"`. |
 | `This repository is configured for … previews on this host.` | The recipe in the repository and the broker entry disagree (build pack or Compose file). Align the broker entry with the recipe and restart the broker. |
 | `The repository is not configured for previews.` | No `projects` entry for this repository, or the broker was not restarted after adding it. |
+| `Application creation is unresolved.` on a preview that the broker refused | Before the broker reported its creations, a refusal left the attempt unresolved forever. Install a release and a broker that include `/kanban/creations`, then use **Réessayer le nettoyage** on the preview: the board asks the broker, which confirms that it never created the application. |
 | « Aucune connexion GitHub Coolify installée n’a accès à ce dépôt privé » | The GitHub App installation used by Coolify cannot see the repository, or its uuid is not declared in any broker entry. Add the repository to the installation (step 2), check the uuid in the entry, then check again from the board. |
 
 ## Autonomous campaigns

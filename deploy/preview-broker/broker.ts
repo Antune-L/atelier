@@ -16,6 +16,7 @@ const HTTP_UNPROCESSABLE = 422;
 const HTTP_BAD_GATEWAY = 502;
 const COOLIFY_PREFIX = "/coolify";
 const CLEANUP_PATH = "/kanban/cleanup";
+const CREATIONS_PATH = "/kanban/creations/";
 const DELETE_QUERY = "delete_configurations=true&delete_volumes=true&docker_cleanup=false&delete_connected_networks=true";
 const UUID_PATTERN = /^[a-z0-9]{24}$/;
 const RESOURCE_UUID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -486,6 +487,13 @@ async function cleanup(body: unknown): Promise<CoolifyResult> {
   return { status: 200, body: await requestCleanup({ appUuid, mode, deploymentUuids }) };
 }
 
+function creationState(marker: string): CoolifyResult {
+  requireString(marker, "ownership marker", MARKER_PATTERN);
+  const registry = readRegistry();
+  const unresolved = registry.intents[marker] !== undefined || Object.values(registry.apps).some((entry) => entry.marker === marker);
+  return { status: 200, body: { unresolved } };
+}
+
 async function readBody(request: Request): Promise<unknown> {
   if (request.method === "GET" || request.method === "DELETE") return undefined;
   const text = await request.text();
@@ -502,6 +510,7 @@ Bun.serve({
       const body = await readBody(request);
       let result: CoolifyResult;
       if (url.pathname === CLEANUP_PATH && request.method === "POST") result = await cleanup(body);
+      else if (url.pathname.startsWith(CREATIONS_PATH) && request.method === "GET") result = creationState(decodeURIComponent(url.pathname.slice(CREATIONS_PATH.length)));
       else if (url.pathname.startsWith(`${COOLIFY_PREFIX}/`)) result = await routeCoolify(request.method, `${url.pathname.slice(COOLIFY_PREFIX.length)}${url.search}`, body);
       else throw new PolicyError(HTTP_FORBIDDEN, "Unknown broker endpoint.");
       return Response.json(result.body, { status: result.status });

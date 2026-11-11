@@ -847,6 +847,10 @@ export class PreviewManager {
     else await this.cleanup(this.get(id), client);
   }
 
+  private async creationUnresolved(ownershipMarker: string): Promise<boolean> {
+    return await this.deps.system.previewCreationUnresolved?.(ownershipMarker) ?? true;
+  }
+
   private async cleanup(preview: PreviewRecord, client: CoolifyClient): Promise<void> {
     if (preview.ticketId) await this.deps.quality?.cancelPreview(preview.ticketId, preview.id);
     if (preview.cleanupWatch && preview.cleanupWatchUntil !== null && Date.now() >= preview.cleanupWatchUntil) {
@@ -856,7 +860,7 @@ export class PreviewManager {
     if (!preview.appUuid && preview.ownershipMarker) {
       const application = await client.findApplication(preview.ownershipMarker);
       if (application) preview = this.update(preview.id, { appUuid: application.uuid });
-      else if (preview.createRequestedAt !== null) {
+      else if (preview.createRequestedAt !== null && await this.creationUnresolved(preview.ownershipMarker)) {
         this.update(preview.id, { status: "stopping", cleanupStatus: "failed", error: "Application creation is unresolved. Absence from the API does not prove resource cleanup." });
         return;
       }

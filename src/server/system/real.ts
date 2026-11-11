@@ -33,7 +33,7 @@ import type { VpsBridgeCall, VpsBridgeResult } from "./vpsBridge.ts";
 import { requestCoolify } from "./coolifyClient.ts";
 import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
 import { inspectPreviewReadiness, readPreviewBranchSource, readPreviewRepository, readPreviewSource } from "./previewSource.ts";
-import { confirmBrokerCleanup, previewBrokerSocket, requestPreviewBroker } from "./previewBroker.ts";
+import { brokerCreationUnresolved, confirmBrokerCleanup, previewBrokerSocket, requestPreviewBroker } from "./previewBroker.ts";
 import { isSuccessStatus, previewBasicAuthorization, previewStatus, previewWebSocketOpens } from "./previewNetwork.ts";
 import { verifyPreviewCleanup } from "./previewCleanup.ts";
 import type { PreviewRecord } from "../../shared/preview.ts";
@@ -285,6 +285,10 @@ export class RealSystemAdapter implements SystemAdapter {
   }
   readPreviewRepository(repoPath: string) {
     return readPreviewRepository(repoPath);
+  }
+  async previewCreationUnresolved(ownershipMarker: string): Promise<boolean> {
+    const brokerSocket = previewBrokerSocket();
+    return brokerSocket === null || brokerCreationUnresolved(brokerSocket, ownershipMarker);
   }
   async confirmPreviewCleanup(preview: PreviewRecord, options: { sshHostAlias: string | null; expectedServerAddress: string | null; removeOwnedResources: boolean; deploymentUuids: string[] }) {
     const brokerSocket = previewBrokerSocket();

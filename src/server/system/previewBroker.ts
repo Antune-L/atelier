@@ -1,4 +1,4 @@
-import type { z } from "zod";
+import { z } from "zod";
 
 import { CLEANUP_RESULT_SCHEMA } from "./previewCleanup.ts";
 import { safeJsonParse } from "./boundedCommand.ts";
@@ -7,6 +7,7 @@ import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
 const BROKER_ORIGIN = "http://preview-broker";
 const COOLIFY_TIMEOUT_MS = 45_000;
 const CLEANUP_TIMEOUT_MS = 90_000;
+const CREATION_STATE_SCHEMA = z.object({ unresolved: z.boolean() });
 
 export function previewBrokerSocket(): string | null {
   return process.env.KANBAN_PREVIEW_BROKER_SOCKET?.trim() || null;
@@ -21,6 +22,16 @@ export async function requestPreviewBroker(socket: string, request: CoolifyReque
     signal: AbortSignal.timeout(COOLIFY_TIMEOUT_MS),
   });
   return { status: response.status, body: safeJsonParse(await response.text()) };
+}
+
+export async function brokerCreationUnresolved(socket: string, ownershipMarker: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${BROKER_ORIGIN}/kanban/creations/${encodeURIComponent(ownershipMarker)}`, { unix: socket, signal: AbortSignal.timeout(COOLIFY_TIMEOUT_MS) });
+    const parsed = CREATION_STATE_SCHEMA.safeParse(safeJsonParse(await response.text()));
+    return !response.ok || !parsed.success || parsed.data.unresolved;
+  } catch {
+    return true;
+  }
 }
 
 export async function confirmBrokerCleanup(socket: string, input: { appUuid: string; removeOwnedResources: boolean; deploymentUuids: string[] }): Promise<z.infer<typeof CLEANUP_RESULT_SCHEMA>> {

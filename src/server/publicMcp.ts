@@ -10,6 +10,10 @@ import { z } from "zod";
 
 import { applicationVersionInputSchema, applicationVersionSchema } from "../shared/applicationVersion.ts";
 import type { ApplicationVersion } from "../shared/applicationVersion.ts";
+import { branchPreviewOutputSchema, createBranchPreviewInputSchema, getBranchPreviewInputSchema } from "../shared/branchPreview.ts";
+import type { BranchPreviewErrorCode } from "../shared/branchPreview.ts";
+import { getErrorMessage } from "../shared/errors.ts";
+import type { PreviewRecord } from "../shared/preview.ts";
 import { COLUMNS, REVIEW_OUTCOMES, VCS_PROVIDERS } from "../shared/constants.ts";
 import {
   analyzeTicketsSchema,
@@ -30,6 +34,8 @@ import { FeasibilityAnswerError } from "./agents/feasibilityAnswerManager.ts";
 import type { FeasibilityAnswerManager } from "./agents/feasibilityAnswerManager.ts";
 import { CAMPAIGN_TOOLS, runCampaignTool } from "./campaign/campaignMcpTools.ts";
 import type { CampaignService } from "./campaign/campaignService.ts";
+import { BranchPreviewError } from "./previewManager.ts";
+import type { PreviewManager } from "./previewManager.ts";
 import { effectivePort, isLoopbackHost, parseHost } from "./requestGuard.ts";
 import { REVIEW_PUBLICATION_EVENTS } from "./system/types.ts";
 import { createReviewTicketInputSchema, createTodoTicketInputSchema, PullRequestListingError, TicketOperationError } from "./ticketOperations.ts";
@@ -44,6 +50,17 @@ const SERVER_VERSION = "1.0.0";
 const TEXT_CONTENT_TYPE = "text";
 const RECENT_COMMENT_LIMIT = 20;
 const columnSchema = z.enum(COLUMNS);
+const BRANCH_PREVIEW_DISPLAY_MESSAGES: Record<BranchPreviewErrorCode | "UNAVAILABLE" | "PREVIEW_ERROR", string> = {
+  PROJECT_NOT_FOUND: "Ce projet est introuvable dans Atelier.",
+  UNSUPPORTED_PROVIDER: "Les prévisualisations Coolify ne prennent en charge que les projets GitHub.",
+  COOLIFY_NOT_CONFIGURED: "Coolify n'est pas configuré : complétez la connexion, le serveur, le projet Coolify, le domaine et les identifiants d'accès dans Paramètres · Coolify.",
+  PREVIEWS_DISABLED: "Les prévisualisations sont désactivées pour ce projet dans Atelier.",
+  RECIPE_NOT_READY: "La recette de prévisualisation n'est pas prête sur cette branche : préparez le projet pour Coolify dans Atelier.",
+  READINESS_CHECK_FAILED: "Impossible de vérifier la recette de prévisualisation de cette branche.",
+  REQUEST_CONFLICT: "Cet identifiant de requête est déjà associé à un autre projet ou à une autre branche.",
+  UNAVAILABLE: "Les prévisualisations de branche sont indisponibles sur ce serveur Atelier.",
+  PREVIEW_ERROR: "Impossible de lancer la prévisualisation de cette branche.",
+};
 
 const compactTicketSchema = z.object({
   id: z.string(),
@@ -258,6 +275,20 @@ const PUBLIC_TOOLS = [
     { name: "read_external_validation_artifact", description: "Reads an owned retained artifact, up to 512000 base64 characters, with its SHA-256 digest.", input: externalArtifactRequestSchema, output: externalArtifactOutputSchema },
   ].map(tool => ({ name: tool.name, description: tool.description, inputSchema: z.toJSONSchema(tool.input), outputSchema: z.toJSONSchema(tool.output) })),
   {
+    name: "create_branch_preview",
+    description: "Deploys a remote branch as a Coolify preview, like the board's Create preview button, without any browser validation. Returns the active preview of the same project and branch when it already targets the current remote SHA, and replaces it when the branch moved. Repeating a requestId returns the preview of its first call. Deployment is asynchronous: follow it with get_branch_preview. Errors carry a French displayMessage for end users.",
+    inputSchema: z.toJSONSchema(createBranchPreviewInputSchema, { io: "input" }),
+    outputSchema: z.toJSONSchema(branchPreviewOutputSchema, { io: "output" }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "get_branch_preview",
+    description: "Reads a branch preview by previewId or by the requestId given to create_branch_preview. Unknown identifiers return a null preview.",
+    inputSchema: z.toJSONSchema(getBranchPreviewInputSchema, { io: "input" }),
+    outputSchema: z.toJSONSchema(branchPreviewOutputSchema, { io: "output" }),
+    annotations: { readOnlyHint: true },
+  },
+  {
     name: "get_application_version",
     description: "Reads the installed Atelier application version and an accessible verified update target. Source installations report the startup commit, never provider versions. Unavailable data includes stable reason codes.",
     inputSchema: z.toJSONSchema(applicationVersionInputSchema, { io: "input" }),
@@ -410,8 +441,8 @@ export function toolResult(schema: OutputValidator, value: unknown): McpTextResu
   };
 }
 
-export function errorResult(code: string, message: string): McpTextResult {
-  const result = { error: { code, message } };
+export function errorResult(code: string, message: string, displayMessage?: string): McpTextResult {
+  const result = { error: { code, message, ...(displayMessage === undefined ? {} : { displayMessage }) } };
   return {
     content: [{ type: TEXT_CONTENT_TYPE, text: JSON.stringify(result) }],
     isError: true,
@@ -463,10 +494,38 @@ export async function serveStatelessMcp(server: Server, request: Request, parsed
   return transport.handleRequest(request, parsedBody === undefined ? undefined : { parsedBody });
 }
 
+function publicBranchPreview(preview: PreviewRecord | null) {
+  if (preview === null) return null;
+  return {
+    id: preview.id, project: preview.project, branch: preview.branch, status: preview.status, desiredState: preview.desiredState, url: preview.url,
+    requestedSha: preview.revision, deployedSha: preview.deployedRevision, error: preview.error, cleanupStatus: preview.cleanupStatus,
+    expiresAt: preview.expiresAt, createdAt: preview.createdAt, updatedAt: preview.updatedAt,
+  };
+}
+
+async function runBranchPreviewTool(name: string, input: unknown, previews: BranchPreviews | undefined, dryRun: boolean): Promise<McpTextResult> {
+  if (previews === undefined) return errorResult("UNAVAILABLE", "Branch previews are unavailable", BRANCH_PREVIEW_DISPLAY_MESSAGES.UNAVAILABLE);
+  if (name === "get_branch_preview") {
+    const parsed = getBranchPreviewInputSchema.safeParse(input);
+    if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
+    return toolResult(branchPreviewOutputSchema, { preview: publicBranchPreview(previews.findBranchPreview(parsed.data)), dryRun });
+  }
+  const parsed = createBranchPreviewInputSchema.safeParse(input);
+  if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
+  try {
+    const preview = await previews.ensureBranch(parsed.data.projectKey, parsed.data.branch, parsed.data.requestId);
+    return toolResult(branchPreviewOutputSchema, { preview: publicBranchPreview(preview), dryRun });
+  } catch (error) {
+    if (error instanceof BranchPreviewError) return errorResult(error.code, error.message, BRANCH_PREVIEW_DISPLAY_MESSAGES[error.code]);
+    return errorResult("PREVIEW_ERROR", previews.redactError(getErrorMessage(error)), BRANCH_PREVIEW_DISPLAY_MESSAGES.PREVIEW_ERROR);
+  }
+}
+
 type QuestionAnswerer = Pick<AgentCoordinator, "submitUserComment">;
+type BranchPreviews = Pick<PreviewManager, "ensureBranch" | "findBranchPreview" | "redactError">;
 type FeasibilityAnswerer = Pick<FeasibilityAnswerManager, "startBatch">;
 
-function createMcpServer(operations: TicketOperations, coordinator: QuestionAnswerer, feasibilityAnswers: FeasibilityAnswerer | undefined, dryRun: boolean, campaigns: CampaignService | null, readApplicationVersion: () => Promise<ApplicationVersion>, external?: ExternalValidationManager): Server {
+function createMcpServer(operations: TicketOperations, coordinator: QuestionAnswerer, feasibilityAnswers: FeasibilityAnswerer | undefined, dryRun: boolean, campaigns: CampaignService | null, readApplicationVersion: () => Promise<ApplicationVersion>, external?: ExternalValidationManager, previews?: BranchPreviews): Server {
   const tools = campaigns === null ? PUBLIC_TOOLS : [...PUBLIC_TOOLS, ...CAMPAIGN_TOOLS];
   return createToolServer(tools, async (request): Promise<McpTextResult> => {
     const input = request.params.arguments ?? {};
@@ -493,6 +552,7 @@ function createMcpServer(operations: TicketOperations, coordinator: QuestionAnsw
           return errorResult("VALIDATION_ERROR", error instanceof Error ? error.message : "External validation failed");
         }
       }
+      if (request.params.name === "create_branch_preview" || request.params.name === "get_branch_preview") return await runBranchPreviewTool(request.params.name, input, previews, dryRun);
       if (request.params.name === "list_projects") {
         const parsed = listProjectsInputSchema.safeParse(input);
         if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
@@ -616,6 +676,7 @@ export class PublicMcpManager {
     private readonly readApplicationVersion: () => Promise<ApplicationVersion> = createApplicationVersionReader({ sourceRevision: null, cloud: false }),
     private readonly external?: ExternalValidationManager,
     private readonly feasibilityAnswers?: FeasibilityAnswerer,
+    private readonly previews?: BranchPreviews,
   ) {
     this.token = token;
   }
@@ -640,6 +701,6 @@ export class PublicMcpManager {
       return jsonResponse(HTTP_BAD_REQUEST, "only MCP POST requests are accepted");
     }
 
-    return serveStatelessMcp(createMcpServer(this.operations, this.coordinator, this.feasibilityAnswers, this.dryRun, this.campaigns, this.readApplicationVersion, this.external), request);
+    return serveStatelessMcp(createMcpServer(this.operations, this.coordinator, this.feasibilityAnswers, this.dryRun, this.campaigns, this.readApplicationVersion, this.external, this.previews), request);
   }
 }

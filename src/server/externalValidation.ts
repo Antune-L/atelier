@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFile
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
 
-import { externalValidationSchema, startExternalValidationSchema } from "../shared/externalValidation.ts";
+import { EXTERNAL_PREVIEW_MARKER_PREFIX, externalValidationSchema, startExternalValidationSchema } from "../shared/externalValidation.ts";
 import type { ExternalValidation, StartExternalValidation } from "../shared/externalValidation.ts";
 import { runQualityValidator } from "./agents/qualityValidator.ts";
 import { assertExecutionAvailable, resolveExecution } from "./agents/executionConfig.ts";
@@ -27,7 +27,7 @@ export class ExternalValidationManager {
     mkdirSync(root, { recursive: true, mode: 0o700 });
   }
   private directory(id: string) { return join(this.root, digest(id)); }
-  private marker(id: string) { return `kanban-preview-external-${digest(id).slice(0, 32)}`; }
+  private marker(id: string) { return `${EXTERNAL_PREVIEW_MARKER_PREFIX}${digest(id).slice(0, 32)}`; }
   private nativeCleanupPending(directory: string): boolean {
     const nativeDirectory = join(directory, "native-cleanup-obligations");
     return existsSync(join(directory, "browser-cleanup-obligation.json")) || existsSync(nativeDirectory) && readdirSync(nativeDirectory).length > 0;

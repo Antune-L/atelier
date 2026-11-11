@@ -57,6 +57,8 @@ import { implementationQueueSchema } from "../../shared/implementationQueue.ts";
 import type { ImplementationQueueLot } from "../../shared/implementationQueue.ts";
 import { AUDIT_ACTIVE_RUN_STATUSES, AUDIT_DAY_MS, AUDIT_OBSERVATION_DAYS, auditFindingSchema, auditProjectSettingsSchema, auditProjectStateSchema, auditRunSchema, updateAuditProjectSettingsSchema } from "../../shared/audit.ts";
 import type { AuditFinding, AuditProjectSettings, AuditProjectState, AuditRun, UpdateAuditProjectSettingsInput } from "../../shared/audit.ts";
+import { branchPreviewRequestSchema } from "../../shared/branchPreview.ts";
+import type { BranchPreviewRequest } from "../../shared/branchPreview.ts";
 import { createPreviewSchema, previewProjectSettingsSchema, previewRecordSchema, updatePreviewProjectSettingsSchema, updatePreviewSchema } from "../../shared/preview.ts";
 import type { CreatePreviewInput, PreviewProjectSettings, PreviewRecord, UpdatePreviewInput, UpdatePreviewProjectSettingsInput } from "../../shared/preview.ts";
 import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewKind } from "../../shared/protocol.ts";
@@ -124,6 +126,7 @@ export class TicketCreationRequestConflictError extends Error {
 
 const log = createLogger("store");
 const PROVIDER_QUOTA_META_PREFIX = "provider_quota:";
+const BRANCH_PREVIEW_REQUEST_META_PREFIX = "branch_preview_request:";
 const persistedReviewStatusSchema = z.enum(["pending", "completed", "failed"]);
 const persistedReviewFindingsSchema = z.array(reviewFindingSchema);
 const reviewFileHashesSchema = z.record(z.string(), z.string());
@@ -3142,6 +3145,15 @@ export class Store {
   getTicketPreview(ticketId: string): PreviewRecord | null {
     const row = this.db.query("SELECT * FROM preview_runs WHERE ticket_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(ticketId);
     return row ? mapPreviewRow(row) : null;
+  }
+
+  getBranchPreviewRequest(requestId: string): BranchPreviewRequest | null {
+    const stored = this.getMeta(`${BRANCH_PREVIEW_REQUEST_META_PREFIX}${requestId}`);
+    return stored === null ? null : branchPreviewRequestSchema.parse(JSON.parse(stored));
+  }
+
+  saveBranchPreviewRequest(requestId: string, request: BranchPreviewRequest): void {
+    this.setMeta(`${BRANCH_PREVIEW_REQUEST_META_PREFIX}${requestId}`, JSON.stringify(branchPreviewRequestSchema.parse(request)));
   }
 
   listPreviews(): PreviewRecord[] {

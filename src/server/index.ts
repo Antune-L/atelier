@@ -464,6 +464,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       }),
       externalValidation,
       feasibilityAnswerManager,
+      previewManager,
     );
 
   await opts.beforeRecovery?.();

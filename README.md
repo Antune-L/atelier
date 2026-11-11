@@ -40,6 +40,8 @@ Then configure the MCP client with the URL above and the token as a Bearer heade
 
 External browser validation tools (`start_external_validation`, `get_external_validation`, `cancel_external_validation`, `read_external_validation_artifact`) are documented in [the validation contract](docs/external-browser-validation.md); their receipts expose `simulated`.
 
+Branch preview tools (`create_branch_preview`, `get_branch_preview`) deploy a remote branch on Coolify like the board's Create preview button, without browser validation; see [their contract](docs/branch-preview-mcp.md).
+
 The desktop app settings show the MCP URL and let you copy the token without exposing it to the web page. The regenerate button immediately replaces the token managed by Atelier; it is disabled when a token is supplied through `KANBAN_MCP_TOKEN`.
 
 `create_todo_ticket` creates a card in TODO without starting its implementation; a new card runs its feasibility analysis in the background. It accepts the same options as creating one from the app: content (`title`, `description`, `externalUrl`), pipeline (`prdEnabled`, `verifyFeature` for E2E verification, `prDraft`, `autoMerge`, `stealth`, `directPush`, `addScreenshots`, `argusMultiLoop`), branch and stacking (`baseBranch`, `dependsOn`), as well as the orchestrator, the implementer and their Claude or Codex models/efforts (`orchestrator`, `implementer`, `model`, `effort`, `implementerModel`, `implementerEffort`, `codexModel`, `codexEffort`, `codexFast`, `codexImplementerModel`, `codexImplementerEffort`, `codexImplementerFast`, `feasibilityEngine`). `requestId` is mandatory and makes creation idempotent: a strictly identical new call returns the existing card, while the same identifier with different options is rejected. Use `start_ticket` afterwards to launch the card; `create_todo_ticket` rejects the `start` field.
@@ -78,4 +80,5 @@ The board routes work, the backend verifies gates, and the agents do the reasoni
 | [docs/architecture.md](docs/architecture.md) | Source layout, agent runtime (Agent SDK), ticket flow |
 | [docs/campaigns.md](docs/campaigns.md) | Autonomous campaigns driven over MCP: plan, readiness, execution into a campaign branch, final pull request, report |
 | [docs/coolify-previews.md](docs/coolify-previews.md) | Configure, prepare, validate and clean up GitHub previews with Coolify |
+| [docs/branch-preview-mcp.md](docs/branch-preview-mcp.md) | MCP tools that deploy a branch preview idempotently, without validation |
 | [AGENTS.md](AGENTS.md) | Guidance for coding agents working on this repository |

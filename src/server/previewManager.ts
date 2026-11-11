@@ -1,8 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import type { BranchPreviewErrorCode } from "../shared/branchPreview.ts";
 import type { Orchestrator } from "../shared/constants.ts";
 import { getErrorMessage } from "../shared/errors.ts";
+import { EXTERNAL_PREVIEW_MARKER_PREFIX } from "../shared/externalValidation.ts";
 import { coolifyInventorySchema, DEFAULT_PREVIEW_HEALTH_PATH, PREVIEW_AUTH_HASH_ENV, PREVIEW_QUALIFICATION_STEP_IDS, PREVIEW_AUTH_USERNAME_ENV, previewBranchSchema, previewGithubRepositorySchema, previewReadinessSchema, previewRecipeSchema, updatePreviewProjectSettingsSchema, updatePreviewSettingsSchema } from "../shared/preview.ts";
 import type { PreviewGithubSourceResolution, PreviewQualification, PreviewQualificationStep, PreviewReadiness, PreviewRecord, UpdatePreviewInput, UpdatePreviewProjectSettingsInput, UpdatePreviewSettingsInput } from "../shared/preview.ts";
 import type { Ticket } from "../shared/schemas.ts";
@@ -67,6 +69,13 @@ interface PreviewManagerDependencies {
   ticketOperations: TicketOperations;
   resourcesRoot: string;
   onChange?: (ticketId: string) => void;
+}
+
+export class BranchPreviewError extends Error {
+  constructor(readonly code: BranchPreviewErrorCode, message: string) {
+    super(message);
+    this.name = "BranchPreviewError";
+  }
 }
 
 export class PreviewManager {
@@ -243,6 +252,52 @@ export class PreviewManager {
       if (getProject(project).vcsProvider !== "github") throw new Error("Coolify previews currently support GitHub projects only.");
       return this.launch(project, { ticketId: null, prUrl: null, branch });
     }));
+  }
+
+  findBranchPreview(lookup: { previewId?: string; requestId?: string }): PreviewRecord | null {
+    const previewId = lookup.previewId ?? (lookup.requestId === undefined ? undefined : this.deps.store.getBranchPreviewRequest(lookup.requestId)?.previewId);
+    const preview = previewId === undefined ? null : this.deps.store.getPreview(previewId);
+    return preview?.ticketId === null ? preview : null;
+  }
+
+  async ensureBranch(project: string, requestedBranch: string, requestId: string): Promise<PreviewRecord> {
+    const branch = previewBranchSchema.parse(requestedBranch);
+    return this.trackRequest(this.operations.run(`branch:${project}:${branch}`, async () => {
+      const request = this.deps.store.getBranchPreviewRequest(requestId);
+      if (request !== null) {
+        if (request.project !== project || request.branch !== branch) throw new BranchPreviewError("REQUEST_CONFLICT", "This requestId already belongs to another project or branch.");
+        return this.get(request.previewId);
+      }
+      if (this.shuttingDown) throw new Error("Preview service is shutting down.");
+      const revision = await this.branchPreviewRevision(project, branch);
+      const active = this.activeBranchPreview(project, branch);
+      const preview = active?.revision === revision ? active : await this.launch(project, { ticketId: null, prUrl: null, branch }, active);
+      if (active && preview !== active) await this.stopPreview(active.id);
+      this.deps.store.saveBranchPreviewRequest(requestId, { project, branch, previewId: preview.id });
+      return preview;
+    }));
+  }
+
+  private activeBranchPreview(project: string, branch: string): PreviewRecord | null {
+    const qualificationPreviewId = this.projectSettings(project).qualification?.previewId ?? null;
+    return this.list().filter((preview) => preview.project === project && preview.branch === branch && preview.ticketId === null
+      && preview.id !== qualificationPreviewId && !preview.ownershipMarker?.startsWith(EXTERNAL_PREVIEW_MARKER_PREFIX)
+      && preview.desiredState === "running" && !["failed", "interrupted"].includes(preview.status)).at(-1) ?? null;
+  }
+
+  private async branchPreviewRevision(project: string, branch: string): Promise<string> {
+    if (!isProjectKey(project)) throw new BranchPreviewError("PROJECT_NOT_FOUND", "Project not found.");
+    if (getProject(project).vcsProvider !== "github") throw new BranchPreviewError("UNSUPPORTED_PROVIDER", "Coolify previews currently support GitHub projects only.");
+    const settings = this.settings;
+    if (!this.deps.config.getCredentials() || !this.deps.system.coolifyRequest || !settings.serverUuid || !settings.projectUuid || !settings.domainBase || !this.deps.config.getPreviewAuth()) {
+      throw new BranchPreviewError("COOLIFY_NOT_CONFIGURED", "Configure the Coolify connection, server, project, HTTPS domain and preview authentication first.");
+    }
+    if (!this.projectSettings(project).enabled) throw new BranchPreviewError("PREVIEWS_DISABLED", "Previews are disabled for this project.");
+    const readiness = await this.readiness(project, branch);
+    const diagnostics = readiness.diagnostics.join("; ");
+    if (readiness.status === "check_error") throw new BranchPreviewError("READINESS_CHECK_FAILED", diagnostics || "The preview recipe of this branch could not be checked.");
+    if (readiness.status !== "ready" || readiness.revision === null) throw new BranchPreviewError("RECIPE_NOT_READY", diagnostics || "The preview recipe is not ready on this branch.");
+    return readiness.revision;
   }
 
   async autonomousPreflight(ticketId: string): Promise<void> {

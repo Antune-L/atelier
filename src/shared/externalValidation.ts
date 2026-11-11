@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { previewBranchSchema } from "./preview.ts";
 
+export const EXTERNAL_PREVIEW_MARKER_PREFIX = "kanban-preview-external-";
+
 export const externalScenarioSchema = z.object({ id: z.string().min(1).max(200), description: z.string().min(1).max(8000), expected: z.string().min(1).max(8000), interaction: z.enum(["interactive", "visual", "display"]) }).strict();
 export const startExternalValidationSchema = z.object({
   requestId: z.string().min(1).max(200), missionId: z.string().min(1).max(200), project: z.string().min(1), branch: previewBranchSchema,

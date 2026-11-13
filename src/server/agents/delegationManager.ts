@@ -2817,6 +2817,7 @@ export class DelegationManager {
       const lot = this.store.getImplementationPlan(ticketId)?.lots.find((entry) => entry.label === state.label);
       this.updatePlannedLot(ticketId, state.planId, state.label, { attempts: Math.max(0, (lot?.attempts ?? 1) - (state.consumesCodeAttempt ? 1 : 0)), infrastructureAttempts: (lot?.infrastructureAttempts ?? 0) + 1 });
     }
+    let integratedQuality: ImplementationLotQuality | null = null;
     try {
       if (state.lotOptions !== null) {
         if (ok) failurePhase = "integration";
@@ -2828,6 +2829,7 @@ export class DelegationManager {
             quality.sourceFileHashes = qualityScopeHashes(source, state.files);
             quality.simplificationObserved = [...state.successfulSimplifierPaths].some((path) => source.fileHashes[path] !== undefined);
             if (!quality.simplificationObserved) throw new Error("Simplification did not inspect any actual file in the lot scope.");
+            integratedQuality = quality;
             this.updatePlannedLot(ticketId, state.planId, state.label, { quality });
           }
           await this.system.finishImplementationLot(state.lotOptions);
@@ -2850,7 +2852,7 @@ export class DelegationManager {
     }
     if (ok && ticket?.autonomous && !state.cancelled) {
       try {
-        const quality = this.store.getImplementationPlan(ticketId)?.lots.find((lot) => lot.label === state.label)?.quality ?? this.newLotQuality(ticket, state, "checking");
+        const quality = this.store.getImplementationPlan(ticketId)?.lots.find((lot) => lot.label === state.label)?.quality ?? integratedQuality ?? this.newLotQuality(ticket, state, "checking");
         if (!quality.sourceFingerprint) {
           const source = await this.system.codeSnapshot(state.childCwd);
           quality.sourceFingerprint = source.fingerprint;

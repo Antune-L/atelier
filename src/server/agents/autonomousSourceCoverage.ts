@@ -10,6 +10,7 @@ import type { QualityCriterion } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import type { AgentImageInput } from "../system/agentSession.ts";
 import { isQualityRepositoryPath } from "../system/qualityReadPolicy.ts";
+import { SourceAuditUnavailableError } from "./qualityBlocker.ts";
 
 import { runQualitySession } from "./qualitySession.ts";
 import type { QualityObservation, QualitySessionOptions } from "./qualitySession.ts";
@@ -133,6 +134,7 @@ export async function auditAutonomousSources(options: Omit<QualitySessionOptions
   const inventoryArtifactPath = join(options.artifactDirectory, "source-inventory.json");
   await writeFile(inventoryArtifactPath, JSON.stringify({ runId: options.runId, provider: options.execution.provider, accepted: inventoryAccepted, snapshotFingerprint: autonomousSourceDigest(options.sources), sessionId: inventorySession.sessionId, response: inventorySession.redact(JSON.stringify({ ...inventoryOutput, obligations: inventory })), observations: inventorySession.observations.map(({ toolCallId, tool, ok, output: text, redactedOutput }) => ({ toolCallId, tool, ok, output: redactedOutput ?? inventorySession.redact(text) })) }));
   options.journal?.observe({ kind: "observation", phase: "source-inventory", status: inventoryAccepted ? "succeeded" : "failed", provider: options.execution.provider, sessionId: inventorySession.sessionId, artifactPaths: [inventoryArtifactPath], summary: "Independent original-source obligation inventory" });
+  if (!inventoryOutput) throw new SourceAuditUnavailableError(`Independent original-source inventory returned no usable answer: ${inventoryArtifactPath}`);
   if (!inventoryAccepted) throw new Error(`Independent original-source inventory is incomplete: ${inventoryArtifactPath}`);
   if (options.signal.aborted) throw new Error("Source inventory cancelled before coverage audit.");
   const session = await runQualitySession({ ...options, images, phase: "source-coverage", mode: "repository", outputSchema: z.toJSONSchema(sourceCoverageResponseSchema, { target: "draft-07" }), prompt: [
@@ -172,5 +174,6 @@ export async function auditAutonomousSources(options: Omit<QualitySessionOptions
   const artifactPath = join(options.artifactDirectory, "source-coverage.json");
   await writeFile(artifactPath, JSON.stringify({ runId: options.runId, provider: options.execution.provider, snapshotFingerprint: autonomousSourceDigest(options.sources), accepted, correctable, inventorySessionId: inventorySession.sessionId, inventoryArtifactPath, attachedSources: options.sources.references.filter((reference) => reference.path && sourceImageMediaType(reference.path)).map(({ reference, digest }) => ({ reference, digest })), sessionId: session.sessionId, response: output ? session.redact(JSON.stringify(output)) : null, observations: session.observations.map(({ toolCallId, tool, ok, output: text, redactedOutput }) => ({ toolCallId, tool, ok, output: redactedOutput ?? session.redact(text) })) }));
   options.journal?.observe({ kind: "observation", phase: "source-coverage", status: accepted ? "succeeded" : "failed", provider: options.execution.provider, sessionId: session.sessionId, artifactPaths: [artifactPath], summary: "Independent original-source coverage audit" });
+  if (!output) throw new SourceAuditUnavailableError(`Independent original-source coverage audit returned no usable answer: ${artifactPath}`);
   return { accepted, correctable, sessionId: session.sessionId, artifactPath, inventorySessionId: inventorySession.sessionId, inventoryArtifactPath };
 }

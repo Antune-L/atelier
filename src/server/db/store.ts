@@ -802,7 +802,7 @@ export class Store {
       if (now >= execution.deadlineAt || execution.starts.length >= execution.maxStarts) throw new Error("No remaining execution allowance; an explicit additional allowance is required");
       const next = autonomousStateSchema.parse({ ...state, phase: "planning", execution: {
         ...execution, generation: execution.generation + 1,
-        workRevokedAt: null, revocationReason: null, userStopRequestedAt: null,
+        workRevokedAt: null, revocationReason: null, userStopRequestedAt: null, finalizationStartedAt: null, finalizationDeadlineAt: null,
         publication: {
           ...execution.publication,
           status: execution.publication.candidatePrUrl !== null || execution.publication.prUrl !== null ? "candidate" : "none",
@@ -856,7 +856,7 @@ export class Store {
         maxStarts: execution.maxStarts + (grant.additionalStarts ?? 0),
         maxCorrections: execution.maxCorrections + (grant.additionalCorrections ?? 0),
         deadlineAt,
-        workRevokedAt: null, revocationReason: null, userStopRequestedAt: null,
+        workRevokedAt: null, revocationReason: null, userStopRequestedAt: null, finalizationStartedAt: null, finalizationDeadlineAt: null,
         publication: {
           ...execution.publication,
           status: execution.publication.candidatePrUrl !== null || execution.publication.prUrl !== null ? "candidate" : "none",

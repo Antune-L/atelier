@@ -27,7 +27,7 @@ import { auditAutonomousSources, autonomousMockupAttachments, autonomousSourceDi
 import { resolveExecution } from "./executionConfig.ts";
 import { executeCombinedQuality, pendingVerification } from "./combinedQuality.ts";
 import { QualityJournal } from "./qualityJournal.ts";
-import { QualityBlockerError } from "./qualityBlocker.ts";
+import { QualityBlockerError, SourceAuditUnavailableError } from "./qualityBlocker.ts";
 import { prepareFunctionalScenarios, prepareQualityCriteria } from "./qualityCriteriaPreparation.ts";
 import type { FunctionalScenarioPlan } from "./qualityCriteriaPreparation.ts";
 import { QUALITY_NATIVE_CLEANUP_DIRECTORY, qualityErrorMessage } from "./qualitySession.ts";
@@ -1257,7 +1257,7 @@ export class QualityManager {
         outcome = { status: "inconclusive", evidenceAccepted: false, failurePhase: phase, error: summary, diagnostic: { category: "environment_blocker", summary, permissionDenials: [], blockers: [{ code: blocker.code, scenarioId: null, summary }] } };
       } else {
         let status: QualityValidationRun["status"] = signal.aborted ? "cancelled" : "failed";
-        if (preview && !signal.aborted) status = "inconclusive";
+        if ((preview || error instanceof SourceAuditUnavailableError) && !signal.aborted) status = "inconclusive";
         outcome = { status, evidenceAccepted: false, failurePhase: phase, error: reason, diagnostic: { category: "validation_incomplete", summary: reason, permissionDenials: [], blockers: [] } };
       }
       log.warn("quality run ended without acceptance", { ticketId: ticket.id, runId: run.id, phase, error: reason });

@@ -6,3 +6,10 @@ export class QualityBlockerError extends Error {
     this.name = "QualityBlockerError";
   }
 }
+
+export class SourceAuditUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SourceAuditUnavailableError";
+  }
+}

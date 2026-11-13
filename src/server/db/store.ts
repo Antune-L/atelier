@@ -803,6 +803,7 @@ export class Store {
       const next = autonomousStateSchema.parse({ ...state, phase: "planning", execution: {
         ...execution, generation: execution.generation + 1,
         workRevokedAt: null, revocationReason: null, userStopRequestedAt: null, finalizationStartedAt: null, finalizationDeadlineAt: null,
+        maxPublicationAttempts: execution.publicationAttempts + (ticket.autonomousMaxPublicationAttempts ?? AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS),
         publication: {
           ...execution.publication,
           status: execution.publication.candidatePrUrl !== null || execution.publication.prUrl !== null ? "candidate" : "none",
@@ -857,6 +858,7 @@ export class Store {
         maxCorrections: execution.maxCorrections + (grant.additionalCorrections ?? 0),
         deadlineAt,
         workRevokedAt: null, revocationReason: null, userStopRequestedAt: null, finalizationStartedAt: null, finalizationDeadlineAt: null,
+        maxPublicationAttempts: execution.publicationAttempts + (ticket.autonomousMaxPublicationAttempts ?? AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS),
         publication: {
           ...execution.publication,
           status: execution.publication.candidatePrUrl !== null || execution.publication.prUrl !== null ? "candidate" : "none",

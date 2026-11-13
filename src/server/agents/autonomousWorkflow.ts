@@ -111,7 +111,7 @@ export class AutonomousWorkflow {
     }
     this.requireFrozen(ticket);
     if (state.deliveryConfirmation || state.hostMutation) return "delivery";
-    this.patch(ticketId, { phase: "checks", error: null });
+    this.patch(ticketId, { phase: "checks", error: null, fullRunId: null, previewRunId: null });
     return "validation";
   }
 

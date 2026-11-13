@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useState, useSyncExternalStore, type ReactNode } from "react";
 
+import { isClosedAutonomousExecution } from "@shared/autonomous";
 import { CARD_TRANSFER_BLOCKER_MESSAGES, cardTransferBlocker } from "@shared/cardTransfer";
 import type { CardTransferBlocker } from "@shared/cardTransfer";
 import { ACTIVE_STAGES, PR_STATE_LABELS, SPLIT_BRANCH_PREFIX } from "@shared/constants";
@@ -409,11 +410,17 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
   if (resolveConflictsFirst) actions.push(resolveConflictsAction);
 
   // A retry on an already-pushed PR would re-spawn a session for an existing PR: hide it there.
+  const canResumeClosedAutonomous =
+    ticket.autonomous &&
+    ticket.slotId !== null &&
+    ticket.autonomousState?.phase !== "completed" &&
+    isClosedAutonomousExecution(ticket.autonomousState);
   const canRetry =
     !recovering &&
-    ticket.stage !== null &&
-    RETRY_STAGES.includes(ticket.stage) &&
-    !(ticket.slotId === null && ticket.prUrl !== null);
+    (canResumeClosedAutonomous ||
+      (ticket.stage !== null &&
+        RETRY_STAGES.includes(ticket.stage) &&
+        !(ticket.slotId === null && ticket.prUrl !== null)));
   if (canRetry) {
     actions.push({
       id: "retry",

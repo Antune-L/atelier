@@ -179,3 +179,30 @@ export function isAutonomousParentIncomplete(input: { autonomous?: boolean; auto
   const closureStatus = input.autonomousState.execution?.closure.status;
   return closureStatus === "requested" || closureStatus === "unknown";
 }
+
+export const AUTONOMOUS_RETRY_MIN_REMAINING_MINUTES = 30;
+
+interface AutonomousRetryLimits {
+  autonomousTimeoutMinutes?: number | null;
+  autonomousMaxStarts?: number | null;
+  autonomousMaxCorrections?: number | null;
+}
+
+export function isClosedAutonomousExecution(state: AutonomousState | null | undefined): boolean {
+  const execution = state?.execution;
+  if (!execution) return false;
+  return execution.workRevokedAt !== null || execution.userStopRequestedAt !== null;
+}
+
+export function autonomousRetryInput(limits: AutonomousRetryLimits, state: AutonomousState, now = Date.now()): AutonomousResumeInput {
+  const execution = state.execution;
+  if (!execution) return { action: "resume" };
+  const input: AutonomousResumeInput = { action: "extend" };
+  if (execution.deadlineAt - now < AUTONOMOUS_RETRY_MIN_REMAINING_MINUTES * AUTONOMOUS_MINUTE_MS) {
+    input.additionalMinutes = limits.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES;
+  }
+  if (execution.starts.length >= execution.maxStarts) input.additionalStarts = limits.autonomousMaxStarts ?? AUTONOMOUS_DEFAULT_MAX_STARTS;
+  if (state.corrections >= execution.maxCorrections) input.additionalCorrections = Math.max(1, limits.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS);
+  if (input.additionalMinutes === undefined && input.additionalStarts === undefined && input.additionalCorrections === undefined) return { action: "resume" };
+  return input;
+}

@@ -16,7 +16,7 @@ import { ProviderAdoptionService } from "./system/providerAdoption.ts";
 import { ProviderUpdateService, readCachedSourceUpdateTarget } from "./system/providerUpdates.ts";
 import { KeyedMutex } from "./mutex.ts";
 import type { SourceUpdateAdmission } from "./system/sourceUpdateAdmission.ts";
-import { autonomousResumeSchema } from "../shared/autonomous.ts";
+import { autonomousResumeSchema, autonomousRetryInput, isClosedAutonomousExecution } from "../shared/autonomous.ts";
 import { ACTIVE_STAGES, isAllowedAgentPair, PRD_SINGLE_SELECTION, SCHEDULED_START_MIN_LEAD_MS, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
 
 import { isSplitMother } from "../shared/dependencies.ts";
@@ -1968,6 +1968,11 @@ export function createApiRoutes(deps: RouteDeps) {
       if (blocker === "triage") return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de relancer l'implémentation");
       if (blocker === "approval") return jsonError(set, HTTP_CONFLICT, REMOTE_APPROVAL_REQUIRED);
       if (blocker === "dependency") return jsonError(set, HTTP_CONFLICT, "en attente de la livraison du ticket dont il dépend");
+      if (ticket.autonomous && ticket.autonomousState && isClosedAutonomousExecution(ticket.autonomousState)) {
+        const outcome = await coordinator.resumeAutonomous(params.id, autonomousRetryInput(ticket, ticket.autonomousState));
+        if (!outcome.ok) return jsonError(set, HTTP_CONFLICT, outcome.result);
+        return store.getTicket(params.id);
+      }
       await slots.retry(params.id);
       return store.getTicket(params.id);
     })

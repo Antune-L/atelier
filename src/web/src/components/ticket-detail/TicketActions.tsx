@@ -419,8 +419,12 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
       id: "retry",
       label: "Relancer",
       run: async () => {
-        await api.retry(ticket.id);
-        ctx.onRefresh();
+        try {
+          await api.retry(ticket.id);
+          ctx.onRefresh();
+        } catch (error) {
+          ctx.onError(errorMessage(error, "Relance refusée"));
+        }
       },
     });
   }

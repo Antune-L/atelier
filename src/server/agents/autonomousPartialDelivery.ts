@@ -165,17 +165,27 @@ export class AutonomousPartialDelivery {
     }
   }
 
+  private async assertOriginalCandidateContents(context: PublicationContext, operationId: string | undefined): Promise<void> {
+    const expectedFingerprint = operationId?.split(":").at(-1);
+    const snapshot = await this.bounded(context, () => this.deps.system.codeSnapshot(context.cwd));
+    if (!expectedFingerprint || snapshot.fingerprint !== expectedFingerprint) throw new Error("Candidate preparation remains uncertain; its original contents were not confirmed.");
+  }
+
   private async reconcileWithin(context: PublicationContext): Promise<void> {
     this.assertCurrent(context);
     const mutation = this.state(context.ticketId).hostMutation;
     if (!mutation) return;
     await this.verifyWorkspace(context);
+    if (mutation.kind === "prepare_candidate" && !await this.bounded(context, () => this.deps.system.gitStatusClean(context.cwd))) {
+      await this.assertOriginalCandidateContents(context, mutation.operationId);
+      this.assertCurrent(context);
+      this.patch(context.ticketId, { hostMutation: null });
+      return;
+    }
     const revision = await this.bounded(context, () => this.deps.system.captureValidationRevision({ repoPath: context.project.repoPath, sourcePath: context.cwd }));
     if (!revision.clean) throw new Error("The retained candidate is not clean enough for read-only reconciliation.");
     if (mutation.kind === "prepare_candidate") {
-      const expectedFingerprint = mutation.operationId?.split(":").at(-1);
-      const snapshot = await this.bounded(context, () => this.deps.system.codeSnapshot(context.cwd));
-      if (!expectedFingerprint || snapshot.fingerprint !== expectedFingerprint) throw new Error("Candidate preparation remains uncertain; its original contents were not confirmed.");
+      await this.assertOriginalCandidateContents(context, mutation.operationId);
       this.assertCurrent(context);
       this.patch(context.ticketId, { revision: revision.commitSha, hostMutation: null });
       this.patchExecution(context.ticketId, { publication: { ...this.execution(context.ticketId).publication, revision: revision.commitSha, status: "candidate", bodyConfirmed: false } });

@@ -1594,7 +1594,12 @@ export class DelegationManager {
       }
       if (lotOptions !== null) {
         preparationPhase = "preparation";
-        const prepared = await this.system.prepareImplementationLot(lotOptions);
+        let prepared = await this.system.prepareImplementationLot(lotOptions);
+        if (prepared.integrated && ticket.autonomous && planId === null && !plannedLot?.quality) {
+          await this.system.discardImplementationLot(lotOptions);
+          this.store.logEvent(ticket.id, "implementation_lot_restarted", { label, reason: "integrated_without_simplification_proof" });
+          prepared = await this.system.prepareImplementationLot(lotOptions);
+        }
         childCwd = prepared.cwd;
         executionGuard?.assertAllowed();
         if (prepared.integrated) {

@@ -33,6 +33,11 @@ export interface SkillRequirement {
  * src/server/agents/sessionConfig.ts.
  */
 export const SKILL_REQUIREMENTS: readonly SkillRequirement[] = [
+  {
+    name: "simplifier",
+    purpose: "Passe d'allègement après chaque lot d'implémentation",
+    installHint: "absent de skillzer : à copier dans ~/.claude/skills et ~/.agents/skills",
+  },
   { name: "argus-review", purpose: "Review bloquante avant PR (étape reviewing)", installHint: null },
   { name: "regression-check", purpose: "Carte des consommateurs après modification", installHint: null },
   { name: "minos-pr-feedback", purpose: "Triage des commentaires de PR (GitHub uniquement)", installHint: null },

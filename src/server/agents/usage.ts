@@ -17,9 +17,9 @@ export function toUsageByModel(usage: Record<string, AgentTurnUsage>): UsageByMo
 }
 
 /**
- * Sum a per-turn usage delta into a session's running total, bucket-by-bucket per model. The SDK
- * reports usage PER TURN (each `result` covers only that turn), so a session's total is the sum of
- * its turn_end deltas — not the last one.
+ * Sum a per-turn usage delta into a session's running total, bucket-by-bucket per model. Providers
+ * emit `turn_end` usage PER TURN (Claude's cumulative `modelUsage` is converted by `turnUsageDelta`),
+ * so a session's total is the sum of its turn_end deltas — not the last one.
  */
 export function addUsageByModel(prior: UsageByModel | undefined, delta: UsageByModel): UsageByModel {
   const out: UsageByModel = { ...(prior ?? {}) };

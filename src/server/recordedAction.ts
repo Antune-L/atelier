@@ -1,6 +1,7 @@
 import { buildErrorDetails } from "../shared/errors.ts";
 import type { ExecutionRun, ExecutionUsageByModel } from "../shared/schemas.ts";
 import type { ResolvedExecution } from "./agents/executionConfig.ts";
+import { mergeAgentUsageByModel } from "./agents/sessionHub.ts";
 import type { Store } from "./db/store.ts";
 import type { AgentSessionEvent } from "./system/agentSession.ts";
 
@@ -28,7 +29,7 @@ export async function runRecordedAction(
     }
     if (event.type === "turn_end") {
       sessionId = event.sessionId;
-      usageByModel = event.usageByModel;
+      usageByModel = mergeAgentUsageByModel(usageByModel, event.usageByModel);
       store.updateExecutionUsage(generationId, usageByModel);
     }
   };

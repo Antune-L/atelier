@@ -10,7 +10,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import type { AgentImageInput, AgentSessionEvent, AgentSessionOptions } from "./agentSession.ts";
-import { createClaudeSubagentTracker, createSdkAgentSession, dispatchClaudeMessage, type ClaudeQuery, type ClaudeSessionDependencies } from "./claudeProvider.ts";
+import { createClaudeSubagentTracker, createSdkAgentSession, dispatchClaudeMessage, turnUsageDelta, type ClaudeQuery, type ClaudeSessionDependencies } from "./claudeProvider.ts";
 
 const RESULT = {
   type: "result",
@@ -303,4 +303,32 @@ test("Claude reports live non-ambient background tasks, including an empty set",
     { type: "background_tasks", activeTaskIds: ["t1", "t2"] },
     { type: "background_tasks", activeTaskIds: [] },
   ]);
+});
+
+test("Claude turns the cumulative modelUsage of each result into a per-turn delta", () => {
+  const events: AgentSessionEvent[] = [];
+  const tracker = createClaudeSubagentTracker();
+  const result = (cacheRead: number, costUSD: number): SDKResultSuccess => ({
+    ...RESULT,
+    modelUsage: {
+      opus: { inputTokens: 10, outputTokens: cacheRead / 10, cacheReadInputTokens: cacheRead, cacheCreationInputTokens: 5, webSearchRequests: 0, costUSD, contextWindow: 200_000, maxOutputTokens: 32_000 },
+    },
+  });
+
+  dispatchClaudeMessage(result(1_000, 1), (event) => events.push(event), undefined, tracker);
+  dispatchClaudeMessage(result(3_000, 2.5), (event) => events.push(event), undefined, tracker);
+
+  const usages = events.flatMap((event) => event.type === "turn_end" ? [event.usageByModel["opus"]] : []);
+  expect(usages).toEqual([
+    { inputTokens: 10, outputTokens: 100, cacheReadTokens: 1_000, cacheCreationTokens: 5, costUsd: 1 },
+    { inputTokens: 0, outputTokens: 200, cacheReadTokens: 2_000, cacheCreationTokens: 0, costUsd: 1.5 },
+  ]);
+});
+
+test("turnUsageDelta treats a total below the previous one as a restarted counter", () => {
+  const previous = { inputTokens: 10, outputTokens: 10, cacheReadTokens: 100, cacheCreationTokens: 10, costUsd: 1 };
+  const restarted = { inputTokens: 2, outputTokens: 3, cacheReadTokens: 40, cacheCreationTokens: 1, costUsd: 0.2 };
+
+  expect(turnUsageDelta(previous, restarted)).toEqual(restarted);
+  expect(turnUsageDelta(undefined, restarted)).toEqual(restarted);
 });

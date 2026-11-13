@@ -533,6 +533,8 @@ export interface ClaudeSubagentTracker {
   taskKeys: Map<string, string>;
   /** Name/type reported at start, echoed on the matching end. */
   identities: Map<string, SubagentIdentity>;
+  /** Last cumulative `modelUsage` seen per model, to turn each `result` into a per-turn delta. */
+  usageTotals: Map<string, AgentTurnUsage>;
 }
 
 interface SubagentIdentity {
@@ -541,7 +543,26 @@ interface SubagentIdentity {
 }
 
 export function createClaudeSubagentTracker(): ClaudeSubagentTracker {
-  return { labels: new Map(), taskKeys: new Map(), identities: new Map() };
+  return { labels: new Map(), taskKeys: new Map(), identities: new Map(), usageTotals: new Map() };
+}
+
+/**
+ * The SDK `modelUsage` of a streaming query is cumulative over the whole query, while every
+ * `turn_end` consumer sums per-turn deltas (as Codex reports them). A total lower than the previous
+ * one means the counter restarted, so it is the delta itself.
+ */
+export function turnUsageDelta(previous: AgentTurnUsage | undefined, total: AgentTurnUsage): AgentTurnUsage {
+  if (!previous || total.inputTokens < previous.inputTokens || total.outputTokens < previous.outputTokens
+    || total.cacheReadTokens < previous.cacheReadTokens || total.cacheCreationTokens < previous.cacheCreationTokens) {
+    return total;
+  }
+  return {
+    inputTokens: total.inputTokens - previous.inputTokens,
+    outputTokens: total.outputTokens - previous.outputTokens,
+    cacheReadTokens: total.cacheReadTokens - previous.cacheReadTokens,
+    cacheCreationTokens: total.cacheCreationTokens - previous.cacheCreationTokens,
+    costUsd: total.costUsd === null || previous.costUsd === null ? total.costUsd : Math.max(0, total.costUsd - previous.costUsd),
+  };
 }
 
 /** Sub-agent attribution fields; parsed from the raw message since not every `user` variant types them. */
@@ -628,13 +649,15 @@ export function dispatchClaudeMessage(
       // still burned tokens, so account it regardless of subtype.
       const usageByModel: Record<string, AgentTurnUsage> = {};
       for (const [model, usage] of Object.entries(message.modelUsage)) {
-        usageByModel[model] = {
+        const total: AgentTurnUsage = {
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
           cacheReadTokens: usage.cacheReadInputTokens,
           cacheCreationTokens: usage.cacheCreationInputTokens,
           costUsd: usage.costUSD,
         };
+        usageByModel[model] = turnUsageDelta(tracker.usageTotals.get(model), total);
+        tracker.usageTotals.set(model, total);
       }
       onEvent({
         type: "turn_end",

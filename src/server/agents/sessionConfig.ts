@@ -51,11 +51,11 @@ const IMPLEMENTER_SAFE_TOOLS = [
 ];
 
 /**
- * Skills referenced by the pipeline contract (review, regression map, mockup fidelity, PR feedback
- * triage). The provider adapts these project instructions to its own session format.
+ * Skills referenced by the pipeline contract (lightening pass, review, regression map, mockup
+ * fidelity, PR feedback triage). The provider adapts these project instructions to its own session format.
  */
 const MINOS_PR_FEEDBACK_SKILL = "minos-pr-feedback";
-export const CONTRACT_SKILLS = ["argus-review", "regression-check", "mockup-fidelity-review", MINOS_PR_FEEDBACK_SKILL];
+export const CONTRACT_SKILLS = ["simplifier", "argus-review", "regression-check", "mockup-fidelity-review", MINOS_PR_FEEDBACK_SKILL];
 
 /** Read-only triage/feasibility/split sessions invoke no skill; scope context to none. */
 const NO_SKILLS: string[] = [];

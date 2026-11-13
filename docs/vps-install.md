@@ -130,7 +130,7 @@ A `setup-token` token (`CLAUDE_CODE_OAUTH_TOKEN=<token>` in `/etc/kanban/kanban.
 **Skills.** On the Mac:
 
 ```bash
-tar -C ~/.codex/skills -czhf /tmp/kanban-skills.tgz argus-review regression-check minos-pr-feedback mockup-fidelity-review
+tar -C ~/.codex/skills -czhf /tmp/kanban-skills.tgz simplifier argus-review regression-check minos-pr-feedback mockup-fidelity-review
 scp -P <ssh-port> /tmp/kanban-skills.tgz <vps>:/tmp/
 ```
 

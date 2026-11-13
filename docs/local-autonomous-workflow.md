@@ -37,7 +37,7 @@ Original spec and mockup coverage is independently audited as described in [Auto
 
 ## Campaign final card
 
-An [autonomous campaign](campaigns.md) creates one autonomous card at finalization. It is linked to the campaign instead of using a dependency or split order, so the pilot accepts it. It adopts the existing campaign branch rather than creating its own, while its pull request targets the base branch: work base and pull request target are separate only for this card. Its delivery is always **Create the PR without merging**; a merge delivery is refused. Its preview is kept after delivery until the campaign's review time. Ordinary campaign cards are not autonomous: they run the ordinary pipeline and the campaign merges them into its branch.
+An [autonomous campaign](campaigns.md) creates one autonomous card at finalization. It is linked to the campaign instead of using a dependency or split order, so the pilot accepts it. It adopts the existing campaign branch rather than creating its own, while its pull request targets the base branch: work base and pull request target are separate only for this card. Its delivery is always **Create the PR without merging**; a merge delivery is refused. Its preview is torn down after delivery like any autonomous card's. Ordinary campaign cards are not autonomous: they run the ordinary pipeline and the campaign merges them into its branch.
 
 ## Recovery and access
 

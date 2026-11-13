@@ -15,7 +15,7 @@ import { resolvePrTargetBaseBranch } from "./baseBranch.ts";
 import { SessionHub } from "./sessionHub.ts";
 import { SlotManager } from "./slotManager.ts";
 
-const MOTHER = "campaign/c1-night";
+const MOTHER = "campaign/c1-demo";
 
 class CheckoutSystem extends FakeSystemAdapter {
   readonly checkouts: { kind: "new" | "existing"; branch: string; start: string }[] = [];
@@ -60,7 +60,7 @@ test("a campaign's final card checks out the existing mother branch and still ta
   const { db, store, system, sessionHub, lifecycle, slots } = setup();
   try {
     const ticket = store.createTicket({ ...makeTicket(), baseBranch: "main" });
-    const campaign = store.campaigns.create("test-proj", "night");
+    const campaign = store.campaigns.create("test-proj", "demo");
     store.campaigns.update(campaign.id, { motherBranch: MOTHER, baseBranch: "main", finalTicketId: ticket.id });
     lifecycle.enqueue(ticket.id);
     await slots.startTicket(ticket.id);

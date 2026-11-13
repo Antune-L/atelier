@@ -82,15 +82,15 @@ export const pauseCampaignInputSchema = commandBaseSchema;
 export const cancelCampaignInputSchema = commandBaseSchema;
 export const resumeCampaignInputSchema = commandBaseSchema.extend({
   extension: z.object({
-    deadlineAt: z.string().datetime({ offset: true }),
     additionalTokens: z.number().int().positive(),
   }).optional(),
 });
+export type CampaignResumeExtension = NonNullable<z.infer<typeof resumeCampaignInputSchema>["extension"]>;
 
 export interface CampaignLifecycle {
   requestPause(campaignId: string): Promise<Campaign>;
   cancel(campaignId: string): Promise<Campaign>;
-  resume(campaignId: string, extension: { deadlineAt: string; additionalTokens: number } | null): Promise<Campaign>;
+  resume(campaignId: string, extension: CampaignResumeExtension | null): Promise<Campaign>;
 }
 
 export const commandResultSchema = z.object({ campaignId: z.string(), status: z.enum(CAMPAIGN_STATUSES), statusReason: z.string().nullable() });

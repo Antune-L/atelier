@@ -11,7 +11,7 @@ describe("workflowRunsOnPullRequestsTo", () => {
 
   test("branch filters decide whether pull requests to the mother branch run CI", () => {
     expect(workflowRunsOnPullRequestsTo({ on: { pull_request: { branches: ["main"] } } }, "campaign/x")).toBe(false);
-    expect(workflowRunsOnPullRequestsTo({ on: { pull_request: { branches: ["main", "campaign/**"] } } }, "campaign/abc-night")).toBe(true);
+    expect(workflowRunsOnPullRequestsTo({ on: { pull_request: { branches: ["main", "campaign/**"] } } }, "campaign/abc-demo")).toBe(true);
     expect(workflowRunsOnPullRequestsTo({ on: { pull_request: { "branches-ignore": ["campaign/*"] } } }, "campaign/x")).toBe(false);
     expect(workflowRunsOnPullRequestsTo({ on: { push: { branches: ["campaign/**"] } } }, "campaign/x")).toBe(false);
   });

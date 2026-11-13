@@ -10,7 +10,6 @@ import { getErrorMessage } from "../../shared/errors.ts";
 import { latestAcceptanceSnapshot, latestFunctionalSnapshot } from "../../shared/quality.ts";
 import type { QualityEvidence, QualityFunctionalBlockerCode, QualityRunDiagnostic, QualityValidationRun } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
-import { campaignPreviewRetainedUntil } from "../campaign/previewRetention.ts";
 import { getProject, isQualityOwner, NOT_QUALITY_OWNER_MESSAGE, SLOTS_ROOT } from "../config.ts";
 import type { Store } from "../db/store.ts";
 import { KeyedMutex } from "../mutex.ts";
@@ -268,12 +267,6 @@ export class AutonomousWorkflow {
     const ticket = this.ticket(ticketId);
     const state = this.state(ticket);
     if (state.phase !== "delivering" || !state.previewId || !state.deliveryConfirmation) throw new Error("Confirm autonomous delivery before cleaning its owned preview.");
-    const retainedUntil = campaignPreviewRetainedUntil(this.deps.store, ticketId);
-    if (retainedUntil !== null) {
-      this.deps.store.logEvent(ticketId, "autonomous_preview_retained", { previewId: state.previewId, until: retainedUntil });
-      this.clearDeadline(ticketId);
-      return;
-    }
     await this.stopConfirmedPreview(ticketId);
     await this.waitFor(ticketId, () => {
       const preview = this.deps.preview.get(state.previewId ?? "");
@@ -611,7 +604,7 @@ export class AutonomousWorkflow {
         const retained = slot?.ticketId === ticket.id && !["abandoned", "failed"].includes(ticket.column);
         if (retained && state.phase !== "delivering") this.patch(ticket.id, { phase: "delivering", error: "Confirmed delivery cleanup is awaiting reconciliation." });
         try {
-          if (campaignPreviewRetainedUntil(this.deps.store, ticket.id) === null) await this.stopConfirmedPreview(ticket.id);
+          await this.stopConfirmedPreview(ticket.id);
           if (retained) await this.deps.inject(ticket.id, "La livraison choisie est déjà confirmée. Le nettoyage de sa preview doit être réconcilié. Appelle deliver_autonomous pour vérifier le résultat existant et achever le nettoyage ; ne recommence ni l’implémentation ni la création de PR.");
         } catch (error) {
           this.patch(ticket.id, { error: this.deps.preview.redactError(getErrorMessage(error)) });

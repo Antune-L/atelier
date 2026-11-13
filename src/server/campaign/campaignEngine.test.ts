@@ -5,7 +5,7 @@ import type { Ticket } from "../../shared/schemas.ts";
 import type { Store } from "../db/store.ts";
 import type { DoneGateResult } from "../system/types.ts";
 import type { PrSnapshot } from "../system/vcs/types.ts";
-import { makeCampaignPlan } from "../testing/campaignFixtures.ts";
+import { makeCampaignPlan, makeCriterion } from "../testing/campaignFixtures.ts";
 
 import { CampaignEngine } from "./campaignEngine.ts";
 import type { CampaignPreviewState, CampaignSlots, CampaignVcs } from "./campaignEngine.ts";
@@ -73,6 +73,10 @@ class FakeVcs implements CampaignVcs {
     if (pr) this.prs.set(prUrl, { ...pr, state: "merged", mergeCommitSha: "f".repeat(40) });
     return Promise.resolve({ ok: true, reason: "" });
   }
+}
+
+function usage(inputTokens: number): Ticket["sessionUsage"] {
+  return { session: { model: { input_tokens: inputTokens, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } };
 }
 
 async function setup(overrides: Parameters<typeof makeCampaignPlan>[0] = {}) {
@@ -300,8 +304,6 @@ describe("CampaignEngine quota pause", () => {
 });
 
 describe("CampaignEngine finalization", () => {
-  const HOUR_MS = 3_600_000;
-
   async function mergeAll(ctx: Awaited<ReturnType<typeof setup>>): Promise<void> {
     await ctx.engine.tick();
     ctx.deliver("A");
@@ -332,45 +334,55 @@ describe("CampaignEngine finalization", () => {
     expect(ctx.store.listTickets(true).filter((entry) => entry.autonomous)).toHaveLength(1);
   });
 
-  test("at the deadline, finalization starts with what is merged, a draft pull request lists the gaps and no further merge happens", async () => {
-    const ctx = await setup();
+  test("when the token envelope is exhausted, finalization starts with what is merged and a draft pull request lists the gaps", async () => {
+    const ctx = await setup({ cards: [
+      { id: "A", title: "Card A", description: "Do A", dependsOn: [], budgetTokens: 100_000, criteria: [makeCriterion("A1")] },
+      { id: "C", title: "Card C", description: "Do C", dependsOn: [], budgetTokens: 100_000, criteria: [makeCriterion("C1")] },
+    ] });
     await ctx.engine.tick();
     ctx.deliver("A");
     await ctx.engine.tick();
-    ctx.clock.now += 7 * HOUR_MS;
+    expect(ctx.store.campaigns.require(ctx.campaignId).status).toBe("running");
+    ctx.store.updateTicket(ctx.ticketOf("C").id, { sessionUsage: usage(800_000) });
     await ctx.engine.tick();
     const campaign = ctx.store.campaigns.require(ctx.campaignId);
     expect(campaign.status).toBe("finalizing");
-    expect(campaign.runtime.finalization?.reason).toBe("deadline");
-    expect(ctx.state("C")).toBe("suspended");
+    expect(campaign.runtime.finalization?.reason).toBe("budget");
+    expect(ctx.state("C")).toBe("blocked");
     const ticket = finalTicket(ctx);
     expect(ticket.prDraft).toBe(true);
     expect(ticket.description).toContain("C: Card C");
-    ctx.deliver("C");
+  });
+
+  test("when no card can progress and nothing is merged, no pull request is opened and the report is produced at once", async () => {
+    const ctx = await setup();
     await ctx.engine.tick();
-    expect(ctx.vcs.merges).toHaveLength(1);
+    for (const id of ["A", "C", "D"]) ctx.deliver(id, { eligible: false });
+    await ctx.engine.tick();
+    const campaign = ctx.store.campaigns.require(ctx.campaignId);
+    expect(campaign.status).toBe("finished");
+    expect(campaign.runtime.finalization?.reason).toBe("no_progress");
+    expect(campaign.finalTicketId).toBeNull();
+    expect(campaign.report?.verdict).toBe("blocked");
+    expect(ctx.notifications).toHaveLength(1);
   });
 
-  test("without any merged change no pull request is opened, and report-only plans skip the final card", async () => {
-    const empty = await setup();
-    await empty.engine.tick();
-    empty.clock.now += 7 * HOUR_MS;
-    await empty.engine.tick();
-    expect(empty.store.campaigns.require(empty.campaignId).status).toBe("awaiting_report");
-    expect(empty.store.campaigns.require(empty.campaignId).finalTicketId).toBeNull();
-
-    const reportOnly = await setup({ partialDelivery: "report_only" });
-    await reportOnly.engine.tick();
-    reportOnly.deliver("A");
-    await reportOnly.engine.tick();
-    reportOnly.clock.now += 7 * HOUR_MS;
-    await reportOnly.engine.tick();
-    expect(reportOnly.store.campaigns.require(reportOnly.campaignId).status).toBe("awaiting_report");
-    expect(reportOnly.store.campaigns.require(reportOnly.campaignId).finalTicketId).toBeNull();
-    expect(reportOnly.store.campaigns.require(reportOnly.campaignId).runtime.statusReason).toContain("report only");
+  test("report-only plans skip the final card when the campaign is incomplete", async () => {
+    const ctx = await setup({ partialDelivery: "report_only" });
+    await ctx.engine.tick();
+    ctx.deliver("A");
+    for (const id of ["C", "D"]) ctx.deliver(id, { eligible: false });
+    await ctx.engine.tick();
+    ctx.deliver("B", { eligible: false });
+    await ctx.engine.tick();
+    const campaign = ctx.store.campaigns.require(ctx.campaignId);
+    expect(campaign.status).toBe("finished");
+    expect(campaign.finalTicketId).toBeNull();
+    expect(campaign.runtime.statusReason).toContain("report only");
+    expect(campaign.report?.cards).toMatchObject({ merged: 1, total: 4 });
   });
 
-  test("the delivered pull request, frozen revision and preview are recorded, then the preview is cleaned after the review time", async () => {
+  test("the delivered pull request, frozen revision and preview are recorded, the report is immediate and the preview is not kept", async () => {
     const ctx = await setup();
     await mergeAll(ctx);
     await ctx.engine.tick();
@@ -380,18 +392,42 @@ describe("CampaignEngine finalization", () => {
     ctx.previews.set("p1", { id: "p1", url: "https://user:secret@preview.example.com/?token=x", cleanupStatus: "pending", error: null });
     ctx.store.updateTicket(ticket.id, { column: "done", prUrl: "https://github.com/o/r/pull/99", autonomousState: { ...state, phase: "completed", revision: "c".repeat(40), previewId: "p1" } });
     await ctx.engine.tick();
-    const finalization = ctx.store.campaigns.require(ctx.campaignId).runtime.finalization;
-    expect(ctx.store.campaigns.require(ctx.campaignId).status).toBe("awaiting_report");
-    expect(finalization).toMatchObject({ prUrl: "https://github.com/o/r/pull/99", prDraft: false, frozenRevision: "c".repeat(40), previewId: "p1" });
-    expect(finalization?.criteria).toEqual([{ id: "G1", status: "missing", evidence: null, revision: null }]);
-    await ctx.engine.tick();
-    expect(ctx.stopped).toEqual([]);
-    ctx.clock.now += 11 * HOUR_MS;
-    await ctx.engine.tick();
+    const campaign = ctx.store.campaigns.require(ctx.campaignId);
+    expect(campaign.status).toBe("finished");
+    expect(campaign.runtime.finalization).toMatchObject({ prUrl: "https://github.com/o/r/pull/99", prDraft: false, frozenRevision: "c".repeat(40), previewId: "p1", previewCleanup: "pending" });
+    expect(campaign.runtime.finalization?.criteria).toEqual([{ id: "G1", status: "missing", evidence: null, revision: null }]);
+    expect(campaign.report?.preview).toEqual({ url: "https://preview.example.com/", cleanup: "pending", cleanupError: null });
     expect(ctx.stopped).toEqual(["p1"]);
+    expect(ctx.notifications).toHaveLength(1);
     ctx.previews.set("p1", { id: "p1", url: null, cleanupStatus: "failed", error: "Coolify refused deletion" });
     await ctx.engine.tick();
-    expect(ctx.store.campaigns.require(ctx.campaignId).runtime.finalization).toMatchObject({ previewCleanup: "failed", previewCleanupError: "Coolify refused deletion" });
+    const cleaned = ctx.store.campaigns.require(ctx.campaignId);
+    expect(cleaned.runtime.finalization).toMatchObject({ previewCleanup: "failed", previewCleanupError: "Coolify refused deletion" });
+    expect(cleaned.report?.preview).toMatchObject({ cleanup: "failed", cleanupError: "Coolify refused deletion" });
+    expect(ctx.notifications).toHaveLength(1);
+  });
+
+  test("a final preview already torn down by the delivery is reported as cleaned", async () => {
+    const ctx = await setup();
+    await mergeAll(ctx);
+    await ctx.engine.tick();
+    const ticket = finalTicket(ctx);
+    const state = ctx.store.ensureAutonomousExecution(ticket.id);
+    if (!state) throw new Error("no autonomous state");
+    ctx.previews.set("p1", { id: "p1", url: "https://preview.example.com/", cleanupStatus: "complete", error: null });
+    ctx.store.updateTicket(ticket.id, { column: "done", prUrl: "https://github.com/o/r/pull/99", autonomousState: { ...state, phase: "completed", revision: "c".repeat(40), previewId: "p1" } });
+    await ctx.engine.tick();
+    expect(ctx.store.campaigns.require(ctx.campaignId).report?.preview.cleanup).toBe("done");
+    expect(ctx.stopped).toEqual([]);
+  });
+
+  test("a campaign stored in the legacy awaiting_report status gets its report on the next pass", async () => {
+    const ctx = await setup();
+    await ctx.engine.tick();
+    ctx.store.campaigns.update(ctx.campaignId, { status: "awaiting_report" });
+    await ctx.engine.tick();
+    expect(ctx.store.campaigns.require(ctx.campaignId).status).toBe("finished");
+    expect(ctx.notifications).toHaveLength(1);
   });
 
   test("the final card refuses merge delivery", async () => {
@@ -405,8 +441,6 @@ describe("CampaignEngine finalization", () => {
 });
 
 describe("CampaignEngine report and user commands", () => {
-  const HOUR_MS = 3_600_000;
-
   test("the verdict priority is unknown, then ready, partial, blocked", async () => {
     const { campaignVerdict } = await import("./report.ts");
     const ctx = await setup();
@@ -418,7 +452,7 @@ describe("CampaignEngine report and user commands", () => {
     expect(campaignVerdict(base)).toBe("blocked");
     const merged = cards.map((card) => ({ ...card, state: "merged" as const }));
     expect(campaignVerdict({ ...base, cards: merged })).toBe("partial");
-    const finalization = { startedAt: 0, reason: "all_merged" as const, frozenRevision: "r1", targetBranch: "main", prUrl: "https://github.com/o/r/pull/9", prDraft: false, previewUrl: null, previewId: null, previewKeepUntil: null, previewCleanup: null, previewCleanupError: null, criteria: [{ id: "G1", status: "passed" as const, evidence: "shot.png", revision: "r1" }], reserveUsedTokens: 0 };
+    const finalization = { startedAt: 0, reason: "all_merged" as const, frozenRevision: "r1", targetBranch: "main", prUrl: "https://github.com/o/r/pull/9", prDraft: false, previewUrl: null, previewId: null, previewCleanup: null, previewCleanupError: null, criteria: [{ id: "G1", status: "passed" as const, evidence: "shot.png", revision: "r1" }], reserveUsedTokens: 0 };
     const ready = { ...campaign, runtime: { ...campaign.runtime, finalization } };
     expect(campaignVerdict({ ...base, campaign: ready, cards: merged })).toBe("ready");
     expect(campaignVerdict({ ...base, campaign: ready, cards: merged, activeSessions: 1 })).toBe("unknown");
@@ -426,26 +460,25 @@ describe("CampaignEngine report and user commands", () => {
     expect(campaignVerdict({ ...base, campaign: stale, cards: merged })).toBe("partial");
   });
 
-  test("the report is produced once at the report time with a single aggregated notification", async () => {
+  test("the report is produced as soon as finalization ends, with a single aggregated notification", async () => {
     const ctx = await setup();
     await ctx.engine.tick();
     ctx.deliver("A");
     await ctx.engine.tick();
-    expect(ctx.notifications).toEqual([]);
-    ctx.clock.now += 6 * HOUR_MS + 1;
+    for (const id of ["B", "C", "D"]) ctx.deliver(id);
     await ctx.engine.tick();
     await ctx.engine.tick();
+    expect(ctx.store.campaigns.require(ctx.campaignId).status).toBe("finalizing");
     expect(ctx.notifications).toEqual([]);
     ctx.store.updateTicket(ctx.store.campaigns.require(ctx.campaignId).finalTicketId ?? "", { column: "abandoned" });
     await ctx.engine.tick();
-    ctx.clock.now += HOUR_MS;
-    await ctx.engine.tick();
-    await ctx.engine.tick();
     const campaign = ctx.store.campaigns.require(ctx.campaignId);
     expect(campaign.status).toBe("finished");
-    expect(campaign.report?.cards).toMatchObject({ merged: 1, total: 4 });
+    expect(campaign.report?.cards).toMatchObject({ merged: 4, total: 4 });
     expect(ctx.notifications).toHaveLength(1);
     expect(ctx.notifications[0]?.title).toContain("Campaign");
+    await ctx.engine.tick();
+    expect(ctx.notifications).toHaveLength(1);
   });
 
   test("pausing waits for the current pass, stops sessions and keeps identities; resuming restarts progressively", async () => {
@@ -463,20 +496,40 @@ describe("CampaignEngine report and user commands", () => {
     expect(ctx.store.listTickets(true)).toHaveLength(4);
   });
 
-  test("pause is refused during a quota pause, and resuming after the deadline requires a new deadline and budget", async () => {
+  test("pause is refused during a quota pause, which an explicit resume lifts without an extension", async () => {
     const ctx = await setup();
     await ctx.engine.tick();
     ctx.engine.recordQuotaRefusal(ctx.ticketOf("A").id, { provider: "claude", resetsAt: null, reason: "rejected" });
     await ctx.engine.tick();
     expect(ctx.engine.requestPause(ctx.campaignId)).rejects.toThrow(/quota pause/);
-    const fresh = await setup();
-    await fresh.engine.tick();
-    await fresh.engine.requestPause(fresh.campaignId);
-    fresh.clock.now += 7 * HOUR_MS;
-    expect(fresh.engine.resume(fresh.campaignId, null)).rejects.toThrow(/new deadline/);
-    const resumed = await fresh.engine.resume(fresh.campaignId, { deadlineAt: new Date(fresh.clock.now + 2 * HOUR_MS).toISOString(), additionalTokens: 200_000 });
+    const resumed = await ctx.engine.resume(ctx.campaignId, null);
     expect(resumed.status).toBe("running");
-    expect(resumed.runtime.extensions).toHaveLength(1);
+    expect(resumed.runtime.quotaPause).toBeNull();
+  });
+
+  test("resuming a campaign whose token budget is exhausted requires an additional budget", async () => {
+    const ctx = await setup();
+    await ctx.engine.tick();
+    await ctx.engine.requestPause(ctx.campaignId);
+    ctx.store.updateTicket(ctx.ticketOf("C").id, { sessionUsage: usage(1_000_000) });
+    ctx.store.campaigns.updateCard(ctx.campaignId, "C", { tokensUsed: 1_000_000 });
+    expect(ctx.engine.resume(ctx.campaignId, null)).rejects.toThrow(/additional token budget/);
+    const resumed = await ctx.engine.resume(ctx.campaignId, { additionalTokens: 500_000 });
+    expect(resumed.status).toBe("running");
+    expect(resumed.runtime.extensions).toEqual([{ additionalTokens: 500_000, at: ctx.clock.now }]);
+  });
+
+  test("reopening a reported campaign requires an additional budget and clears its report", async () => {
+    const ctx = await setup();
+    await ctx.engine.tick();
+    for (const id of ["A", "C", "D"]) ctx.deliver(id, { eligible: false });
+    await ctx.engine.tick();
+    expect(ctx.store.campaigns.require(ctx.campaignId).status).toBe("finished");
+    expect(ctx.engine.resume(ctx.campaignId, null)).rejects.toThrow(/additional token budget/);
+    const reopened = await ctx.engine.resume(ctx.campaignId, { additionalTokens: 200_000 });
+    expect(reopened.status).toBe("running");
+    expect(reopened.report).toBeNull();
+    expect(reopened.runtime.finalization).toBeNull();
   });
 
   test("cancelling keeps merges and branches, stops sessions and produces the report", async () => {

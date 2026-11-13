@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { makeCampaignPlan, makeCriterion } from "../server/testing/campaignFixtures.ts";
 
-import { campaignApprovalBlockers, campaignPlanSchema, changedCampaignCards, validateCampaignPlan } from "./campaign.ts";
+import { campaignApprovalBlockers, campaignPlanSchema, campaignReportSchema, campaignRuntimeSchema, changedCampaignCards, validateCampaignPlan } from "./campaign.ts";
 
 function codes(overrides: Parameters<typeof makeCampaignPlan>[0]): string[] {
   return validateCampaignPlan(campaignPlanSchema.parse(makeCampaignPlan(overrides)), "main").map((issue) => issue.code);
@@ -63,5 +63,21 @@ describe("changedCampaignCards", () => {
     const previous = campaignPlanSchema.parse(makeCampaignPlan());
     const next = campaignPlanSchema.parse({ ...makeCampaignPlan(), cards: previous.cards.map((card) => (card.id === "A" ? { ...card, description: "Do A differently" } : card)) });
     expect([...changedCampaignCards(previous, next)].sort()).toEqual(["A", "B"]);
+  });
+});
+
+describe("legacy campaign rows", () => {
+  test("a stored plan, runtime and report written with a schedule still parse", () => {
+    const plan = campaignPlanSchema.parse({ ...makeCampaignPlan(), schedule: { deadlineAt: "2026-11-07T06:00:00Z", reportAt: "2026-11-07T07:00:00Z", reviewUntil: "2026-11-07T10:00:00Z" } });
+    expect("schedule" in plan).toBe(false);
+    expect(validateCampaignPlan(plan, "main")).toEqual([]);
+    const runtime = campaignRuntimeSchema.parse({
+      extensions: [{ deadlineAt: "2026-11-08T06:00:00Z", additionalTokens: 1_000, at: 1 }],
+      finalization: { startedAt: 1, reason: "deadline", frozenRevision: null, targetBranch: "main", prUrl: null, prDraft: null, previewUrl: null, previewId: null, previewKeepUntil: 2, previewCleanup: null, previewCleanupError: null, criteria: [], reserveUsedTokens: 0 },
+    });
+    expect(runtime.finalization?.reason).toBe("deadline");
+    expect(runtime.extensions[0]?.additionalTokens).toBe(1_000);
+    expect(campaignReportSchema.shape.preview.safeParse({ url: null, keepUntil: 2, cleanup: null, cleanupError: null }).success).toBe(true);
+    expect(campaignReportSchema.shape.preview.safeParse({ url: null, cleanup: null, cleanupError: null }).success).toBe(true);
   });
 });

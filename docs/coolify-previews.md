@@ -149,7 +149,7 @@ The configured lifetime starts the expiration workflow, but expiration and clean
 
 ### Campaign previews
 
-The final card of an [autonomous campaign](campaigns.md) keeps its preview after delivery until the review time approved in the plan, so the user can check the final pull request on it; the campaign then stops it and reports a cleanup failure instead of hiding it. An explicit stop or the configured lifetime still applies. The readiness check of a campaign counts active previews plus one reserved broker slot for each other approved campaign that has no final preview yet, against `KANBAN_PREVIEW_MAX_ACTIVE` (default 3, mirrors the broker's `maxActivePreviews`).
+The final card of an [autonomous campaign](campaigns.md) validates the global criteria on its own preview, which is torn down right after delivery like any autonomous card's; the campaign stops it if it is still up when finalization ends and reports a cleanup failure instead of hiding it. To check the final pull request later, open a preview of the mother branch on demand with `create_branch_preview`. The readiness check of a campaign counts active previews plus one reserved broker slot for each other approved campaign that has no final preview yet, against `KANBAN_PREVIEW_MAX_ACTIVE` (default 3, mirrors the broker's `maxActivePreviews`).
 
 ## Troubleshooting
 

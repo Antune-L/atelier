@@ -1,4 +1,5 @@
-import type { CampaignCardPlan, CampaignCriterion, CampaignPlan, CampaignSkillFingerprint } from "../../shared/campaign.ts";
+import { AUTONOMOUS_MAX_TIMEOUT_MINUTES } from "../../shared/autonomous.ts";
+import type { CampaignAttachment, CampaignCardPlan, CampaignCriterion, CampaignPlan, CampaignSkillFingerprint } from "../../shared/campaign.ts";
 import type { NewTicket } from "../db/store.ts";
 
 export const DECISION_LINE_PREFIX = "- Decision:";
@@ -27,6 +28,25 @@ function listOrNone(items: readonly string[]): string {
   return items.length === 0 ? "- none" : items.map((item) => `- ${item}`).join("\n");
 }
 
+const MOCKUP_EXTENSIONS = [".html", ".htm"];
+
+function attachmentLine(attachment: CampaignAttachment): string {
+  const name = attachment.label ?? attachment.id;
+  const mockup = MOCKUP_EXTENSIONS.some((extension) => attachment.path.toLowerCase().endsWith(extension)) ? " — UI mockup" : "";
+  return `${name}: \`${attachment.path}\` (sha256 ${attachment.sha256})${mockup}`;
+}
+
+function referenceFilesBlock(attachments: readonly CampaignAttachment[]): string[] {
+  const ranked = [...attachments].sort((left, right) => left.rank - right.rank);
+  return [
+    "### Reference files",
+    "",
+    "Read every file below before implementing; they are frozen by the approved plan. HTML files are UI mockups the implementation must follow.",
+    "",
+    listOrNone(ranked.map(attachmentLine)),
+  ];
+}
+
 export interface CardSkillGuidance {
   name: string;
   fingerprint: CampaignSkillFingerprint | null;
@@ -38,7 +58,7 @@ function guidanceBlock(guidance: CardSkillGuidance): string {
   return `### ${guidance.name} (sha256 ${guidance.fingerprint?.sha256 ?? "unknown"})\n\n${guidance.instructions.trim()}`;
 }
 
-/** Card brief: scope, verifiable criteria, the plan's rules for autonomous decisions, and the skill guidance read for this campaign (FR4, FR14). */
+/** Card brief: scope, verifiable criteria, the plan's reference files, the plan's rules for autonomous decisions, and the skill guidance read for this campaign (FR4, FR14). */
 export function campaignCardDescription(plan: CampaignPlan, card: CampaignCardPlan, motherBranch: string, guidance: readonly CardSkillGuidance[]): string {
   return [
     card.description,
@@ -50,6 +70,8 @@ export function campaignCardDescription(plan: CampaignPlan, card: CampaignCardPl
     "### Verifiable criteria",
     "",
     criteriaBlocks(card.criteria),
+    "",
+    ...referenceFilesBlock(plan.attachments),
     "",
     "### Accepted assumptions",
     "",
@@ -121,9 +143,7 @@ export function campaignCardTicket(plan: CampaignPlan, card: CampaignCardPlan, m
   };
 }
 
-const MIN_FINAL_TIMEOUT_MINUTES = 30;
-const MAX_FINAL_TIMEOUT_MINUTES = 1440;
-const MINUTE_MS = 60_000;
+const FINAL_TIMEOUT_MINUTES = AUTONOMOUS_MAX_TIMEOUT_MINUTES;
 
 /** Brief of the final card: validate the adopted mother branch and open the pull request to the base (FR6, FR7). */
 export function campaignFinalDescription(plan: CampaignPlan, motherBranch: string, baseBranch: string, missingCards: readonly string[], guidance: readonly CardSkillGuidance[]): string {
@@ -142,6 +162,8 @@ export function campaignFinalDescription(plan: CampaignPlan, motherBranch: strin
     "",
     criteriaBlocks(plan.globalCriteria),
     "",
+    ...referenceFilesBlock(plan.attachments),
+    "",
     "### Cards not merged into the campaign branch",
     "",
     listOrNone(missingCards),
@@ -156,15 +178,13 @@ export function campaignFinalDescription(plan: CampaignPlan, motherBranch: strin
   ].join("\n");
 }
 
-export function campaignFinalTicket(plan: CampaignPlan, baseBranch: string, description: string, draft: boolean, now: number, reportAt: number): NewTicket {
-  const minutesToReport = Math.floor((reportAt - now) / MINUTE_MS);
-  const timeout = Math.min(MAX_FINAL_TIMEOUT_MINUTES, Math.max(MIN_FINAL_TIMEOUT_MINUTES, minutesToReport));
+export function campaignFinalTicket(plan: CampaignPlan, baseBranch: string, description: string, draft: boolean): NewTicket {
   return {
     ...campaignCardTicket(plan, { id: "final", title: `Finalize: ${plan.title}`, description, dependsOn: [], budgetTokens: plan.budget.finalReserveTokens, criteria: [] }, baseBranch, description),
     title: `Finalize campaign: ${plan.title}`,
     prDraft: draft,
     autonomous: true,
     autonomousDelivery: "pr_only",
-    autonomousTimeoutMinutes: timeout,
+    autonomousTimeoutMinutes: FINAL_TIMEOUT_MINUTES,
   };
 }

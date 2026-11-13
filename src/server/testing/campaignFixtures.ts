@@ -13,12 +13,10 @@ export function makeCriterion(id: string): CampaignCriterion {
   };
 }
 
-const HOUR_MS = 3_600_000;
-
-export function makeCampaignPlan(overrides: Partial<CampaignPlanInput> = {}, now = Date.now()): CampaignPlanInput {
+export function makeCampaignPlan(overrides: Partial<CampaignPlanInput> = {}): CampaignPlanInput {
   return {
     project: FIXTURE_PROJECT_KEY,
-    title: "Night campaign",
+    title: "Autonomous campaign",
     cards: [
       { id: "A", title: "Card A", description: "Do A", dependsOn: [], budgetTokens: 100_000, criteria: [makeCriterion("A1")] },
       { id: "B", title: "Card B", description: "Do B", dependsOn: ["A"], budgetTokens: 100_000, criteria: [makeCriterion("B1")] },
@@ -27,11 +25,6 @@ export function makeCampaignPlan(overrides: Partial<CampaignPlanInput> = {}, now
     ],
     globalCriteria: [makeCriterion("G1")],
     budget: { totalTokens: 1_000_000, finalReserveTokens: 300_000 },
-    schedule: {
-      deadlineAt: new Date(now + 6 * HOUR_MS).toISOString(),
-      reportAt: new Date(now + 7 * HOUR_MS).toISOString(),
-      reviewUntil: new Date(now + 10 * HOUR_MS).toISOString(),
-    },
     ...overrides,
   };
 }

@@ -52,7 +52,6 @@ export function buildCampaignReport(input: ReportInput): CampaignReport {
     finalPr: { url: finalization?.prUrl ?? null, draft: finalization?.prDraft ?? null },
     preview: {
       url: finalization?.previewUrl ?? null,
-      keepUntil: finalization?.previewKeepUntil ?? null,
       cleanup: finalization?.previewCleanup ?? null,
       cleanupError: finalization?.previewCleanupError ?? null,
     },

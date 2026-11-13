@@ -15,6 +15,7 @@ export const CAMPAIGN_STATUSES = [
   "paused",
   "quota_paused",
   "finalizing",
+  // NOTE(ali): legacy status, kept only so stored campaigns still parse; the engine never produces it.
   "awaiting_report",
   "finished",
   "cancelled",
@@ -111,13 +112,6 @@ export const campaignBudgetSchema = z.object({
 });
 export type CampaignBudget = z.infer<typeof campaignBudgetSchema>;
 
-export const campaignScheduleSchema = z.object({
-  deadlineAt: isoDateSchema,
-  reportAt: isoDateSchema,
-  reviewUntil: isoDateSchema,
-});
-export type CampaignSchedule = z.infer<typeof campaignScheduleSchema>;
-
 export const campaignQuotaPolicySchema = z.object({
   autoResume: z.boolean().default(true),
   fallbackProvider: z.enum(["claude", "codex"]).nullable().default(null),
@@ -139,7 +133,6 @@ export const campaignPlanSchema = z.object({
   questions: z.array(campaignQuestionSchema).max(100).default([]),
   exclusions: z.array(z.string().trim().min(1).max(2000)).max(100).default([]),
   budget: campaignBudgetSchema,
-  schedule: campaignScheduleSchema,
   quotaPolicy: campaignQuotaPolicySchema.default({ autoResume: true, fallbackProvider: null }),
   partialDelivery: z.enum(CAMPAIGN_PARTIAL_DELIVERY).default("draft_pr"),
   externalEffects: z.array(z.string().trim().min(1).max(200)).max(50).default([]),
@@ -262,12 +255,6 @@ export function validateCampaignPlan(plan: CampaignPlan, baseBranch: string): Ca
   if (cardBudget > plan.budget.totalTokens - plan.budget.finalReserveTokens) {
     issues.push({ code: "invalid_budget", path: "budget", message: `Card budgets (${cardBudget}) exceed the envelope minus the final reserve (${plan.budget.totalTokens - plan.budget.finalReserveTokens}).` });
   }
-  const deadline = Date.parse(plan.schedule.deadlineAt);
-  const report = Date.parse(plan.schedule.reportAt);
-  const review = Date.parse(plan.schedule.reviewUntil);
-  if (!(deadline <= report && report <= review)) {
-    issues.push({ code: "invalid_schedule", path: "schedule", message: "Expected deadlineAt <= reportAt <= reviewUntil." });
-  }
   if (plan.motherBranch !== undefined && (plan.motherBranch === baseBranch || !isSafeBranchName(plan.motherBranch))) {
     issues.push({ code: "invalid_mother_branch", path: "motherBranch", message: `Mother branch "${plan.motherBranch}" is not allowed.` });
   }
@@ -345,16 +332,20 @@ export const campaignQuotaPauseSchema = z.object({
 });
 export type CampaignQuotaPause = z.infer<typeof campaignQuotaPauseSchema>;
 
+export const CAMPAIGN_FINALIZATION_REASONS = ["all_merged", "budget", "no_progress"] as const;
+export type CampaignFinalizationReason = (typeof CAMPAIGN_FINALIZATION_REASONS)[number];
+const LEGACY_FINALIZATION_REASONS = ["deadline"] as const;
+
 export const campaignFinalizationSchema = z.object({
   startedAt: timestampSchema,
-  reason: z.enum(["all_merged", "deadline", "budget", "no_progress"]),
+  reason: z.enum([...CAMPAIGN_FINALIZATION_REASONS, ...LEGACY_FINALIZATION_REASONS]),
   frozenRevision: z.string().nullable(),
   targetBranch: z.string().min(1),
   prUrl: z.string().nullable(),
   prDraft: z.boolean().nullable(),
   previewUrl: z.string().nullable(),
   previewId: z.string().nullable(),
-  previewKeepUntil: timestampSchema.nullable(),
+  previewKeepUntil: timestampSchema.nullable().optional(),
   previewCleanup: z.enum(["pending", "done", "failed"]).nullable(),
   previewCleanupError: z.string().nullable(),
   criteria: z.array(z.object({
@@ -378,9 +369,9 @@ export function missingGlobalCriteria(plan: Pick<CampaignPlan, "globalCriteria">
 }
 
 export const campaignExtensionSchema = z.object({
-  deadlineAt: isoDateSchema,
   additionalTokens: z.number().int().positive(),
   at: timestampSchema,
+  deadlineAt: isoDateSchema.optional(),
 });
 
 export const CAMPAIGN_READINESS_ITEMS = [
@@ -525,7 +516,7 @@ export const campaignReportSchema = z.object({
     endedAt: timestampSchema.nullable(),
   }),
   finalPr: z.object({ url: z.string().nullable(), draft: z.boolean().nullable() }),
-  preview: z.object({ url: z.string().nullable(), keepUntil: timestampSchema.nullable(), cleanup: z.string().nullable(), cleanupError: z.string().nullable() }),
+  preview: z.object({ url: z.string().nullable(), keepUntil: timestampSchema.nullable().optional(), cleanup: z.string().nullable(), cleanupError: z.string().nullable() }),
   criteria: z.object({ validated: z.number().int(), total: z.number().int(), items: campaignFinalizationSchema.shape.criteria }),
   cards: z.object({
     merged: z.number().int(),
@@ -549,21 +540,4 @@ export type CampaignReport = z.infer<typeof campaignReportSchema>;
 /** Approved token envelope plus every explicit extension (FR12). */
 export function campaignEnvelopeTokens(plan: CampaignPlan, runtime: Pick<CampaignRuntime, "extensions">): number {
   return plan.budget.totalTokens + runtime.extensions.reduce((sum, extension) => sum + extension.additionalTokens, 0);
-}
-
-export interface EffectiveSchedule {
-  deadlineAt: number;
-  reportAt: number;
-  reviewUntil: number;
-}
-
-/** Approved times, shifted by the latest explicit extension given when resuming after the deadline (FR12). */
-export function effectiveSchedule(plan: CampaignPlan, runtime: Pick<CampaignRuntime, "extensions">): EffectiveSchedule {
-  const deadlineAt = Date.parse(plan.schedule.deadlineAt);
-  const reportAt = Date.parse(plan.schedule.reportAt);
-  const reviewUntil = Date.parse(plan.schedule.reviewUntil);
-  const extension = runtime.extensions.at(-1);
-  if (extension === undefined) return { deadlineAt, reportAt, reviewUntil };
-  const shift = Math.max(0, Date.parse(extension.deadlineAt) - deadlineAt);
-  return { deadlineAt: deadlineAt + shift, reportAt: reportAt + shift, reviewUntil: reviewUntil + shift };
 }

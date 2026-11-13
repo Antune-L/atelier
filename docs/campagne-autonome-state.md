@@ -1,6 +1,12 @@
 # Autonomous campaign — working state
 
-## Current state (2026-11-07)
+## Current state (2026-11-13)
+
+- Branch `feat/campaign-anytime` (from `origin/main` at `9b39fc1`, not committed): campaigns are runnable at any time. The plan `schedule` (deadline, report and review times) is gone and a legacy one is ignored; finalization starts when every card is merged, the token envelope is spent or nothing can progress (`all_merged`, `budget`, `no_progress`; `deadline` is parsed for legacy rows only); the report is produced as soon as finalization ends (`awaiting_report` is parsed for legacy rows only and a legacy campaign in it is reported on the next pass); the final preview is torn down after delivery like any autonomous card's (`previewRetention.ts` removed, `previewKeepUntil` / report `keepUntil` legacy-only); `resume_campaign` takes `extension: { additionalTokens }`, mandatory only to reopen a reported campaign or to resume one whose budget is exhausted, and can also lift a quota pause; card and final briefs now list the plan's frozen attachments under "Reference files". The PRD copy updated for this change is in this worktree's `plans/` (gitignored) and still has to be copied to the main checkout.
+
+## History
+
+### 2026-11-07
 
 - PRD: `plans/20261107-campagne-autonome.prd.json` in the main checkout (`/Users/antoineliu/kanban-agents`, untracked: `plans/` is gitignored). Now **revision 11**: FR14 attached to T2 and T3, FR15 to T2 (acceptance and boundaries added); `.prd.html` re-rendered. `.complet.html` (PRD + Orchestrator mockup) was not regenerated.
 - Base: `origin/main` at `dd73e47` (it already ships 10 public MCP tools, not 8).
@@ -27,14 +33,14 @@
 - No mother ticket. The campaign row owns the mother branch, so the split mother's `done` column never triggers finalization and statistics are unchanged.
 - Campaign cards are ordinary feature tickets with `dependsOn = null`, `baseBranch = <mother>` and `autoMerge = false`: they fork from and target the mother. Multiple prerequisites live in the campaign plan; `dependsOn`, `isDependencyReady` and `prdMarkdown` stay single-parent and unchanged.
 - The engine performs every merge into the mother through a journaled operation (PR re-read first, target must be the mother, review clean), one bounded conflict resolution.
-- The final card is an autonomous (Devin) ticket, `pr_only`, `baseBranch = main`, linked through `campaigns.final_ticket_id`; `resolveAdoptedWorkBranch` makes it check out the existing mother branch (T9). Its preview is kept until the review time.
+- The final card is an autonomous (Devin) ticket, `pr_only`, `baseBranch = main`, linked through `campaigns.final_ticket_id`; `resolveAdoptedWorkBranch` makes it check out the existing mother branch (T9). Its preview is torn down after delivery like any autonomous card's (retention until a review time was removed on 2026-11-13).
 - FR15: the VPS cannot call the Mac (bridge is Mac-initiated). `install_campaign_skill` accepts the folder sent by the Orchestrator, or fetches skillzer at `8f3ccad6e73c4629c51c1ffed535009bf32eeac2` (verified: `argus-review` present, `simplifier` absent).
 - Implementer caps live in `src/shared/constants.ts`, not `src/server/constants.ts`.
 
 ## Verified findings
 
 - Before this work nothing detected a quota refusal; T5 adds detection for a rejected Claude rate-limit window and for session errors naming a usage limit (narrow pattern on purpose).
-- Autonomous previews were always stopped at delivery and forced to stop afterwards; T6 adds retention for the campaign final card only.
+- Autonomous previews were always stopped at delivery and forced to stop afterwards; T6 added retention for the campaign final card only, removed again on 2026-11-13.
 - The preview broker allows 3 active previews by default and has no capacity API.
 
 ## Checks (latest)
@@ -61,11 +67,11 @@ Scenario matrix (simulated coverage today → real run expected):
 | 4 | Stop the service during a merge | journaled merge confirmed on GitHub after restart, not repeated | restart test |
 | 5 | Conflict between two cards | one bounded resolution, then card and descendants blocked, others continue | conflict test |
 | 6 | Question the plan does not settle (e.g. a real email) | card blocked, question in the report, no notification | engine sync (no dedicated test) |
-| 7 | Quota exhausted at night | `quota_paused`, sessions stopped, progressive resume when observed quota returns | quota tests |
+| 7 | Quota exhausted mid-run | `quota_paused`, sessions stopped, progressive resume when observed quota returns | quota tests |
 | 8 | Budget exhausted | no new start, finalization with what is merged | quota/budget test |
 | 9 | Two campaigns on one repository | the second waits in `queued` | engine test |
 | 10 | Preview cleanup failure | reported with its error, captures kept | finalization test |
-| 11 | Resume later with a new deadline and budget | extension recorded, cards restart | command tests |
+| 11 | Resume a reported or budget-exhausted campaign with an additional budget | extension recorded, cards restart | command tests |
 | 12 | Ordinary cards meanwhile (GitHub and Azure) | unchanged behaviour | full suite only |
 
 Also measure the memory footprint per session (cgroup `memory.current` while N implementers run) and set `KANBAN_IMPLEMENTER_MEMORY_MB` / `KANBAN_MEMORY_RESERVE_MB` from it. No scenario sends real email.

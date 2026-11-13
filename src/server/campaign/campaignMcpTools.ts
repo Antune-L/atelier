@@ -24,7 +24,7 @@ const submitInputDoc = z.object({
   requestId: z.string().describe("Persistent idempotent identifier chosen by the client; replaying it returns the first result."),
   campaignId: z.string().optional().describe("Existing campaign to add a version to; omit to create a campaign."),
   baseVersion: z.number().int().optional().describe("Version the client edited; a stale value is refused with the current version."),
-  plan: campaignPlanSchema.describe("Structured campaign plan: cards with prerequisites and criteria, global criteria, attachments, assumptions, questions, exclusions, budget, schedule and policies."),
+  plan: campaignPlanSchema.describe("Structured campaign plan: cards with prerequisites and criteria, global criteria, frozen attachments given to every card brief, assumptions, questions, exclusions, token budget and policies. A campaign has no time-of-day schedule: it runs as soon as it is approved and ready."),
 });
 const submitOutputSchema = z.object({ campaignId: z.string(), version: z.number().int(), approvalBlockers: z.array(campaignPlanIssueSchema), dryRun: z.boolean() });
 
@@ -118,7 +118,7 @@ export const CAMPAIGN_TOOLS = [
   },
   {
     name: "resume_campaign",
-    description: "Resumes a paused campaign progressively, or a reported one. After the deadline, a new deadline and an additional token budget are mandatory.",
+    description: "Resumes a paused or quota-paused campaign progressively, or reopens a reported one. An additional token budget (extension.additionalTokens) is mandatory to reopen a reported campaign or to resume one whose token budget is exhausted; it is optional otherwise.",
     inputSchema: z.toJSONSchema(resumeCampaignInputSchema, { io: "input" }),
     outputSchema: z.toJSONSchema(commandOutputSchema, { io: "output" }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },

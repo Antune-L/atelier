@@ -1,5 +1,7 @@
 import type { AutonomousState } from "../../shared/autonomous.ts";
 import type { CommitLanguage } from "../../shared/constants.ts";
+import type { ReviewFinding } from "../../shared/protocol.ts";
+import type { TicketQuality } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import type { Store } from "../db/store.ts";
 import { redactSecrets } from "../system/secretRedaction.ts";
@@ -21,6 +23,9 @@ export interface PartialPublicationLayout {
 }
 const OUTPUT_EXCERPT_LIMIT = 4000;
 const TECHNICAL_CHECKS = ["typecheck", "lint", "test"] satisfies Array<"typecheck" | "lint" | "test">;
+const SHORT_SHA_LENGTH = 7;
+const BLOCKING_SEVERITIES: ReviewFinding["severity"][] = ["critical", "major"];
+const BLOCKING_VERIFICATIONS: ReviewFinding["verificationStatus"][] = ["confirmed", "not_needed"];
 
 function outputExcerpt(output: string): string {
   const redacted = redactSecrets(output);
@@ -34,91 +39,77 @@ export function partialPublicationMarkers(ticketId: string) {
   return { start: `<!-- kanban-partial:${ticketId}:start -->`, end: `<!-- kanban-partial:${ticketId}:end -->` };
 }
 
+function shortSha(revision: string): string {
+  return revision.slice(0, SHORT_SHA_LENGTH);
+}
+
+function criterionStatus(quality: TicketQuality, state: AutonomousState, criterionId: string, revision: string): string {
+  const currentRuns = quality.runs.filter((run) => run.revision === revision && !run.simulated);
+  const evidence = quality.evidence.filter((entry) => entry.criterionId === criterionId && currentRuns.some((run) => run.id === entry.runId)).at(-1);
+  if (!evidence) return "not verified";
+  const run = currentRuns.find((entry) => entry.id === evidence.runId);
+  const accepted = run?.status === "passed" && run.evidenceAccepted && run.criteriaSnapshotId === state.functionalSnapshotId
+    && state.functionalSnapshotId !== null && evidence.kind === "behavior" && evidence.authority === "agent";
+  if (evidence.status === "failed") return `failed: ${evidence.summary}`;
+  if (evidence.status === "passed" && accepted) return "passed";
+  return "not verified";
+}
+
+function checkStatus(quality: TicketQuality, check: string, configured: string | undefined, revision: string): string {
+  const evidence = quality.evidence.filter((entry) => {
+    const run = quality.runs.find((candidate) => candidate.id === entry.runId);
+    return entry.kind === "command" && !run?.simulated && run?.revision === revision && entry.command?.toLowerCase().includes((configured ?? check).toLowerCase());
+  }).at(-1);
+  if (!evidence) return `${check} not run`;
+  if (evidence.status === "passed") return `${check} passed`;
+  return `${check} ${evidence.status} (exit ${evidence.exitCode ?? "unknown"})`;
+}
+
 export function partialPublicationSection(store: Store, ticket: Ticket, state: AutonomousState, revision: string, reason: string, layout: PartialPublicationLayout): string {
   const execution = state.execution;
   if (!execution) throw new Error("Bounded autonomous execution is required for partial publication.");
   const quality = store.getTicketQuality(ticket.id);
   const template = PR_DESCRIPTION_TEMPLATES[layout.language];
-  const contextLines = [PARTIAL_INTRO, "",
-    `Candidate commit: ${revision}`, `Reason: ${reason}`, "",
-    `Starts: ${execution.starts.length}/${execution.maxStarts}. Corrections: ${state.corrections}/${execution.maxCorrections}. Environment retries: ${state.environmentRetries}/${execution.maxEnvironmentRetries}.`,
-    `Work deadline: ${new Date(execution.deadlineAt).toISOString()}. Publication attempts: ${execution.publicationAttempts}/${execution.maxPublicationAttempts}.`,
-    `Finalization deadline: ${new Date(execution.finalizationDeadlineAt ?? execution.deadlineAt).toISOString()}.`];
-  const retainedLines = ["The ticket worktree and implementation lots are retained for explicit recovery."];
+  const review = store.getReviewPass(ticket.id);
+  const reviewCurrent = review?.reviewedCommitSha === revision;
   const plan = store.getImplementationPlan(ticket.id);
   const lots = plan?.lots ?? store.listImplementationLotStates(ticket.id);
-  for (const lot of lots) retainedLines.push(`- ${lot.label}: ${lot.status}.${lot.status === "completed" ? "" : " This lot is not confirmed integrated and covered."}`);
-  for (const archive of plan?.recovery?.archives ?? []) retainedLines.push(`- Preserved lot ${archive.label}: ${archive.archivePath}; journal: ${archive.journalPath ?? "none recorded"}.`);
-  if (lots.length === 0) retainedLines.push("- No implementation lot is recorded.");
-  const lines = layout.includeSummary
-    ? [renderReviewLevelLine(layout.language, PARTIAL_REVIEW_LEVEL, PARTIAL_REVIEW_REASONS[layout.language]), "", template.context, "", ...contextLines, "", template.changes, "", ...retainedLines, "", template.vigilance]
-    : [SECTION_TITLE, "", ...contextLines, "", template.vigilance];
-  lines.push("", "### Verification reservations", "");
-  if (!state.plan) lines.push("- No autonomous acceptance plan was frozen; acceptance remains unexecuted.");
-  for (const criterion of state.plan?.criteria ?? []) {
-    const currentRuns = quality.runs.filter((run) => run.revision === revision && !run.simulated);
-    const evidence = quality.evidence.filter((entry) => entry.criterionId === criterion.id && currentRuns.some((run) => run.id === entry.runId)).at(-1);
-    let status = "unexecuted";
-    if (evidence) {
-      const run = currentRuns.find((entry) => entry.id === evidence.runId);
-      const accepted = run?.status === "passed" && run.evidenceAccepted && run.criteriaSnapshotId === state.functionalSnapshotId
-        && state.functionalSnapshotId !== null && evidence.kind === "behavior" && evidence.authority === "agent";
-      status = evidence.status;
-      if (evidence.status === "passed" && !accepted) status = "inconclusive; criterion acceptance evidence is missing or unaccepted";
-    }
-    else if (quality.evidence.some((entry) => entry.criterionId === criterion.id)) status = "historical evidence only; missing for this candidate";
-    lines.push(`- ${criterion.id}: ${status}. ${evidence?.summary ?? criterion.expected}`);
-  }
-  if (!quality.runs.some((run) => run.revision === revision && ["checks", "full", "combined"].includes(run.kind))) lines.push("- Local checks: unexecuted for this candidate; matching persisted evidence is missing.");
-  if (!quality.runs.some((run) => run.revision === revision && ["behavior", "functional", "combined"].includes(run.kind))) lines.push("- Browser verification: unexecuted for this candidate; matching persisted evidence is missing.");
-  for (const run of quality.runs) {
-    let status: string = run.status;
-    if (run.revision !== revision) status = `historical ${run.status}; missing for this candidate`;
-    else if (run.simulated) status = `simulated ${run.status}; real evidence missing`;
-    else if (run.status === "queued") status = "unexecuted";
-    else if (run.status === "running" || run.status === "interrupted" || run.status === "cancelled") status = "inconclusive";
-    else if (run.status === "passed" && !run.evidenceAccepted) status = "inconclusive; acceptance evidence was not accepted";
-    lines.push(`- ${run.kind} (${run.id}, ${run.revision}): ${status}.${run.error ? ` ${run.error}` : ""}`);
-  }
-  lines.push("", "### Technical check evidence", "");
-  const commands = quality.evidence.filter((entry) => entry.kind === "command");
   const project = store.getProjectRow(ticket.project);
-  for (const check of TECHNICAL_CHECKS) {
-    const configured = project?.scripts?.[check];
-    const evidence = commands.filter((entry) => {
-      const run = quality.runs.find((candidate) => candidate.id === entry.runId);
-      return run?.revision === revision && entry.command?.toLowerCase().includes((configured ?? check).toLowerCase());
-    }).at(-1);
-    if (!evidence) lines.push(`- ${check}: unexecuted for this candidate; persisted command evidence is missing.${configured ? ` Configured command: ${configured}.` : ""}`);
-  }
-  for (const evidence of commands) {
+  const intro = `**${PARTIAL_INTRO}** Candidate \`${shortSha(revision)}\`. Stopped because: ${reason}`;
+  const unfinishedLots = lots.filter((lot) => lot.status !== "completed");
+  const changes = unfinishedLots.length === 0
+    ? `All ${lots.length} implementation lot(s) completed.`
+    : unfinishedLots.map((lot) => `- ${lot.label}: ${lot.status}, not confirmed integrated.`).join("\n");
+  const lines = layout.includeSummary
+    ? [renderReviewLevelLine(layout.language, PARTIAL_REVIEW_LEVEL, PARTIAL_REVIEW_REASONS[layout.language]), "", template.context, "", intro, "", template.changes, "", changes, "", template.vigilance]
+    : [SECTION_TITLE, "", intro, "", changes];
+  const blocking = requiredReviewKinds(ticket.reviewDepth ?? "full").flatMap((kind) => (review?.results[kind]?.findings ?? [])
+    .filter((finding) => BLOCKING_SEVERITIES.includes(finding.severity) && BLOCKING_VERIFICATIONS.includes(finding.verificationStatus))
+    .map((finding) => `- ${finding.severity} (${kind}${reviewCurrent ? "" : ", older commit"}): ${finding.summary}${finding.path ? ` \`${finding.path}${finding.line === null ? "" : `:${finding.line}`}\`` : ""}`));
+  if (blocking.length > 0) lines.push("", "### Blocking findings", "", ...blocking);
+  lines.push("", "### Still to verify", "");
+  lines.push(`- Technical checks on this commit: ${TECHNICAL_CHECKS.map((check) => checkStatus(quality, check, project?.scripts?.[check], revision)).join(", ")}.`);
+  if (!state.plan) lines.push("- Acceptance: no autonomous acceptance plan was frozen.");
+  for (const criterion of state.plan?.criteria ?? []) lines.push(`- ${criterion.id}: ${criterionStatus(quality, state, criterion.id, revision)}.`);
+  lines.push(`- Independent review: ${reviewCurrent ? "done on this commit" : "last run on an older commit; the latest changes are unreviewed"}.`);
+  const details = [
+    `Starts ${execution.starts.length}/${execution.maxStarts}, corrections ${state.corrections}/${execution.maxCorrections}, environment retries ${state.environmentRetries}/${execution.maxEnvironmentRetries}, publication attempts ${execution.publicationAttempts}/${execution.maxPublicationAttempts}.`,
+    `Work deadline ${new Date(execution.deadlineAt).toISOString()}. The ticket worktree and implementation lots are retained for explicit recovery.`,
+    "",
+    ...lots.map((lot) => `- Lot ${lot.label}: ${lot.status}.`),
+    ...(plan?.recovery?.archives ?? []).map((archive) => `- Preserved lot ${archive.label}: ${archive.archivePath}; journal: ${archive.journalPath ?? "none recorded"}.`),
+    ...quality.runs.map((run) => `- Run ${run.kind} ${run.id} (${shortSha(run.revision)}): ${run.simulated ? "simulated " : ""}${run.status}.${run.error ? ` ${run.error}` : ""}`),
+  ];
+  for (const evidence of quality.evidence) {
     const run = quality.runs.find((candidate) => candidate.id === evidence.runId);
-    let status: string = evidence.status;
-    if (!run || run.revision !== revision) status = `historical ${status}; missing for this candidate`;
-    else if (run.simulated) status = `simulated ${status}; real evidence missing`;
-    else if (evidence.status === "passed" && (run.status !== "passed" || !run.technicalEvidenceAccepted || evidence.authority !== "server")) status = "inconclusive; technical evidence is unaccepted";
-    lines.push(`- ${evidence.command ?? "Command unavailable"}: ${status}; exit code ${evidence.exitCode ?? "unknown"}; timeout ${evidence.timedOut}. ${evidence.summary}`);
-    const output = outputExcerpt(evidence.output);
-    if (output) lines.push("", ...output.split("\n").map((line) => `> ${line}`), "");
-    else lines.push("  Output evidence is missing.");
+    if (evidence.kind !== "command" || run?.revision !== revision || evidence.status === "passed") continue;
+    details.push("", `\`${evidence.command ?? "command"}\` ${evidence.status}, exit ${evidence.exitCode ?? "unknown"}:`, "", "```", outputExcerpt(evidence.output), "```");
   }
-  lines.push("", "### Independent review reservations", "");
-  const review = store.getReviewPass(ticket.id);
   for (const kind of requiredReviewKinds(ticket.reviewDepth ?? "full")) {
     const result = review?.results[kind];
-    let status = "unexecuted; no persisted result";
-    if (result) {
-      if (review?.reviewedCommitSha !== revision) status = `historical ${result.status}; missing for this candidate`;
-      else if (result.status === "failed" || result.verificationStatus === "failed") status = "failed";
-      else if (result.status !== "completed" || result.verificationStatus === "pending") status = "inconclusive";
-      else if (result.verdict === "approve") status = "approved";
-      else status = "changes requested";
-    }
-    lines.push(`- ${kind}: ${status}.${result?.summary ? ` ${result.summary}` : ""}${result?.error ? ` ${result.error}` : ""}`);
-    for (const finding of result?.findings ?? []) lines.push(`  - ${finding.severity}: ${finding.summary} Verification: ${finding.verificationStatus}. ${finding.evidence}${finding.path ? ` Location: ${finding.path}${finding.line === null ? "" : `:${finding.line}`}.` : ""}`);
+    details.push(`- Review ${kind}: ${result ? `${result.status}${result.verdict ? `, ${result.verdict}` : ""}` : "not run"}.`);
   }
-  if (!review || review.reviewedCommitSha !== revision) lines.push("- Current candidate changes have not been independently reviewed at this exact commit. Existing unreviewed-change sections in the PR body are preserved.");
-  if (!layout.includeSummary) lines.push("", "### Retained implementation work", "", ...retainedLines);
+  lines.push("", "<details><summary>Run details</summary>", "", ...details, "", "</details>");
   const markers = partialPublicationMarkers(ticket.id);
   return `${markers.start}\n${redactSecrets(lines.join("\n"))}\n${markers.end}`;
 }

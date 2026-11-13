@@ -40,7 +40,7 @@ Then configure the MCP client with the URL above and the token as a Bearer heade
 
 External browser validation tools (`start_external_validation`, `get_external_validation`, `cancel_external_validation`, `read_external_validation_artifact`) are documented in [the validation contract](docs/external-browser-validation.md); their receipts expose `simulated`.
 
-Branch preview tools (`create_branch_preview`, `get_branch_preview`) deploy a remote branch on Coolify like the board's Create preview button, without browser validation; see [their contract](docs/branch-preview-mcp.md).
+Branch preview tools (`create_branch_preview`, `get_branch_preview`, `stop_branch_preview`) deploy, inspect and stop a remote branch preview on Coolify like the board's Create preview button, without browser validation; see [their contract](docs/branch-preview-mcp.md).
 
 The desktop app settings show the MCP URL and let you copy the token without exposing it to the web page. The regenerate button immediately replaces the token managed by Atelier; it is disabled when a token is supplied through `KANBAN_MCP_TOKEN`.
 

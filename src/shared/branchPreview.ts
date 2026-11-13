@@ -4,7 +4,7 @@ import { previewBranchSchema, previewCleanupStatusSchema, previewDesiredStateSch
 
 const MAX_REQUEST_ID_LENGTH = 200;
 
-export const BRANCH_PREVIEW_ERROR_CODES = ["PROJECT_NOT_FOUND", "UNSUPPORTED_PROVIDER", "COOLIFY_NOT_CONFIGURED", "PREVIEWS_DISABLED", "RECIPE_NOT_READY", "READINESS_CHECK_FAILED", "REQUEST_CONFLICT"] as const;
+export const BRANCH_PREVIEW_ERROR_CODES = ["PROJECT_NOT_FOUND", "UNSUPPORTED_PROVIDER", "COOLIFY_NOT_CONFIGURED", "PREVIEWS_DISABLED", "RECIPE_NOT_READY", "READINESS_CHECK_FAILED", "REQUEST_CONFLICT", "NOT_BRANCH_PREVIEW"] as const;
 export type BranchPreviewErrorCode = typeof BRANCH_PREVIEW_ERROR_CODES[number];
 
 const requestIdSchema = z.string().trim().min(1).max(MAX_REQUEST_ID_LENGTH).describe("Stable caller identifier: repeating it returns the preview of its first call instead of creating another one.");

@@ -307,6 +307,7 @@ test("an official MCP client lists, creates idempotently, starts, and updates RE
     "read_external_validation_artifact",
     "start_external_validation",
     "start_ticket",
+    "stop_branch_preview",
     "update_ticket",
   ];
   const names = tools.tools.map((tool) => tool.name);

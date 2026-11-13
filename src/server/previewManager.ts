@@ -255,9 +255,20 @@ export class PreviewManager {
   }
 
   findBranchPreview(lookup: { previewId?: string; requestId?: string }): PreviewRecord | null {
-    const previewId = lookup.previewId ?? (lookup.requestId === undefined ? undefined : this.deps.store.getBranchPreviewRequest(lookup.requestId)?.previewId);
-    const preview = previewId === undefined ? null : this.deps.store.getPreview(previewId);
+    const preview = this.findPreviewByLookup(lookup);
     return preview?.ticketId === null ? preview : null;
+  }
+
+  private findPreviewByLookup(lookup: { previewId?: string; requestId?: string }): PreviewRecord | null {
+    const previewId = lookup.previewId ?? (lookup.requestId === undefined ? undefined : this.deps.store.getBranchPreviewRequest(lookup.requestId)?.previewId);
+    return previewId === undefined ? null : this.deps.store.getPreview(previewId);
+  }
+
+  async stopBranchPreview(lookup: { previewId?: string; requestId?: string }): Promise<PreviewRecord | null> {
+    const preview = this.findPreviewByLookup(lookup);
+    if (preview === null) return null;
+    if (!this.isOnDemandBranchPreview(preview)) throw new BranchPreviewError("NOT_BRANCH_PREVIEW", "This preview is not an on-demand branch preview.");
+    return this.stop(preview.id);
   }
 
   async ensureBranch(project: string, requestedBranch: string, requestId: string): Promise<PreviewRecord> {
@@ -279,10 +290,13 @@ export class PreviewManager {
   }
 
   private activeBranchPreview(project: string, branch: string): PreviewRecord | null {
-    const qualificationPreviewId = this.projectSettings(project).qualification?.previewId ?? null;
-    return this.list().filter((preview) => preview.project === project && preview.branch === branch && preview.ticketId === null
-      && preview.id !== qualificationPreviewId && !preview.ownershipMarker?.startsWith(EXTERNAL_PREVIEW_MARKER_PREFIX)
+    return this.list().filter((preview) => preview.project === project && preview.branch === branch && this.isOnDemandBranchPreview(preview)
       && preview.desiredState === "running" && !["failed", "interrupted"].includes(preview.status)).at(-1) ?? null;
+  }
+
+  private isOnDemandBranchPreview(preview: PreviewRecord): boolean {
+    const qualificationPreviewId = this.projectSettings(preview.project).qualification?.previewId ?? null;
+    return preview.ticketId === null && preview.id !== qualificationPreviewId && !preview.ownershipMarker?.startsWith(EXTERNAL_PREVIEW_MARKER_PREFIX);
   }
 
   private async branchPreviewRevision(project: string, branch: string): Promise<string> {

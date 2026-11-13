@@ -1,6 +1,6 @@
 # Branch preview MCP
 
-Two tools of the authenticated local public MCP endpoint deploy a remote branch as a Coolify preview, exactly like the board's **Create preview** button (`POST /api/projects/:key/previews`). They start no browser validation session and create no ticket; use the [external validation tools](external-browser-validation.md) when validation is needed. Schemas live in `src/shared/branchPreview.ts`; the deployment engine is the existing `PreviewManager` (`ensureBranch`, `findBranchPreview`).
+Three tools of the authenticated local public MCP endpoint deploy a remote branch as a Coolify preview, exactly like the board's **Create preview** button (`POST /api/projects/:key/previews`). They start no browser validation session and create no ticket; use the [external validation tools](external-browser-validation.md) when validation is needed. Schemas live in `src/shared/branchPreview.ts`; the deployment engine is the existing `PreviewManager` (`ensureBranch`, `findBranchPreview`, `stop`).
 
 ## `create_branch_preview`
 
@@ -23,9 +23,15 @@ Deployment is asynchronous: the first response is usually `queued`. Poll `get_br
 
 Input: exactly one of `{previewId}` or `{requestId}`. Unknown identifiers, and previews owned by a ticket, return `{preview: null}`. The tool is read-only.
 
+## `stop_branch_preview`
+
+Input: exactly one of `{previewId}` or `{requestId}`, using the same schema as `get_branch_preview`. Unknown identifiers return `{preview: null}`. Only on-demand branch previews can be stopped: previews owned by a ticket, an external validation or a qualification run are refused with `NOT_BRANCH_PREVIEW` and a French `displayMessage`.
+
+The tool delegates to the existing `PreviewManager.stop` cleanup path and returns `status: stopping` or `stopped`. Cleanup is asynchronous; poll `get_branch_preview` to follow it. Calling the tool again on an already stopped preview returns its state without error. MCP annotations are `destructiveHint: true` and `idempotentHint: true`.
+
 ## Output
 
-Both tools return `{preview, dryRun}` where `preview` is `null` (get only) or:
+All three tools return `{preview, dryRun}` where `preview` is `null` (get and stop only) or:
 
 | Field | Meaning |
 | --- | --- |
@@ -54,8 +60,9 @@ Errors are `{error: {code, message, displayMessage?}}` with `isError: true`. `me
 | `RECIPE_NOT_READY` | The branch has no ready preview recipe; `message` lists the diagnostics |
 | `READINESS_CHECK_FAILED` | The branch recipe could not be inspected |
 | `REQUEST_CONFLICT` | The `requestId` belongs to another project or branch |
+| `NOT_BRANCH_PREVIEW` | The preview is not an on-demand branch preview (stop only) |
 | `UNAVAILABLE` | The server was started without a preview manager |
-| `PREVIEW_ERROR` | Any other launch failure; `message` holds the redacted cause |
+| `PREVIEW_ERROR` | Any other launch or stop failure; `message` holds the redacted cause |
 
 ## Storage and verification boundaries
 

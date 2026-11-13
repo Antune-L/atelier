@@ -58,6 +58,7 @@ const BRANCH_PREVIEW_DISPLAY_MESSAGES: Record<BranchPreviewErrorCode | "UNAVAILA
   RECIPE_NOT_READY: "La recette de prévisualisation n'est pas prête sur cette branche : préparez le projet pour Coolify dans Atelier.",
   READINESS_CHECK_FAILED: "Impossible de vérifier la recette de prévisualisation de cette branche.",
   REQUEST_CONFLICT: "Cet identifiant de requête est déjà associé à un autre projet ou à une autre branche.",
+  NOT_BRANCH_PREVIEW: "Cette prévisualisation n'est pas une prévisualisation de branche à la demande et ne peut pas être arrêtée avec cet outil.",
   UNAVAILABLE: "Les prévisualisations de branche sont indisponibles sur ce serveur Atelier.",
   PREVIEW_ERROR: "Impossible de lancer la prévisualisation de cette branche.",
 };
@@ -289,6 +290,13 @@ const PUBLIC_TOOLS = [
     annotations: { readOnlyHint: true },
   },
   {
+    name: "stop_branch_preview",
+    description: "Stops an on-demand branch preview by previewId or by the requestId given to create_branch_preview. Returns stopping or stopped; unknown identifiers return a null preview. Repeating a call on a stopped preview returns its state. Rejects previews owned by tickets, external validations or qualification runs. Errors carry a French displayMessage for end users.",
+    inputSchema: z.toJSONSchema(getBranchPreviewInputSchema, { io: "input" }),
+    outputSchema: z.toJSONSchema(branchPreviewOutputSchema, { io: "output" }),
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+  },
+  {
     name: "get_application_version",
     description: "Reads the installed Atelier application version and an accessible verified update target. Source installations report the startup commit, never provider versions. Unavailable data includes stable reason codes.",
     inputSchema: z.toJSONSchema(applicationVersionInputSchema, { io: "input" }),
@@ -510,6 +518,17 @@ async function runBranchPreviewTool(name: string, input: unknown, previews: Bran
     if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
     return toolResult(branchPreviewOutputSchema, { preview: publicBranchPreview(previews.findBranchPreview(parsed.data)), dryRun });
   }
+  if (name === "stop_branch_preview") {
+    const parsed = getBranchPreviewInputSchema.safeParse(input);
+    if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
+    try {
+      const preview = await previews.stopBranchPreview(parsed.data);
+      return toolResult(branchPreviewOutputSchema, { preview: publicBranchPreview(preview), dryRun });
+    } catch (error) {
+      if (error instanceof BranchPreviewError) return errorResult(error.code, error.message, BRANCH_PREVIEW_DISPLAY_MESSAGES[error.code]);
+      return errorResult("PREVIEW_ERROR", previews.redactError(getErrorMessage(error)), "Impossible d'arrêter la prévisualisation de cette branche.");
+    }
+  }
   const parsed = createBranchPreviewInputSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
   try {
@@ -522,7 +541,7 @@ async function runBranchPreviewTool(name: string, input: unknown, previews: Bran
 }
 
 type QuestionAnswerer = Pick<AgentCoordinator, "submitUserComment">;
-type BranchPreviews = Pick<PreviewManager, "ensureBranch" | "findBranchPreview" | "redactError">;
+type BranchPreviews = Pick<PreviewManager, "ensureBranch" | "findBranchPreview" | "stopBranchPreview" | "redactError">;
 type FeasibilityAnswerer = Pick<FeasibilityAnswerManager, "startBatch">;
 
 function createMcpServer(operations: TicketOperations, coordinator: QuestionAnswerer, feasibilityAnswers: FeasibilityAnswerer | undefined, dryRun: boolean, campaigns: CampaignService | null, readApplicationVersion: () => Promise<ApplicationVersion>, external?: ExternalValidationManager, previews?: BranchPreviews): Server {
@@ -552,7 +571,7 @@ function createMcpServer(operations: TicketOperations, coordinator: QuestionAnsw
           return errorResult("VALIDATION_ERROR", error instanceof Error ? error.message : "External validation failed");
         }
       }
-      if (request.params.name === "create_branch_preview" || request.params.name === "get_branch_preview") return await runBranchPreviewTool(request.params.name, input, previews, dryRun);
+      if (request.params.name === "create_branch_preview" || request.params.name === "get_branch_preview" || request.params.name === "stop_branch_preview") return await runBranchPreviewTool(request.params.name, input, previews, dryRun);
       if (request.params.name === "list_projects") {
         const parsed = listProjectsInputSchema.safeParse(input);
         if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");

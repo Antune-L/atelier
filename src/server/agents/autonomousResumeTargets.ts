@@ -35,8 +35,14 @@ export function autonomousReservedCriteriaInstruction(reserves: CriterionReferen
   return `Critères laissés en réserve, ne travaille pas dessus : ${reserves.map(criterionLabel).join("; ")}.`;
 }
 
-export function autonomousReservedCriteriaPauseReason(reserves: CriterionReference[]): string {
-  return `Les critères ciblés par la reprise sont acceptés par la validation indépendante. Les critères laissés en réserve par l’utilisateur restent non vérifiés : ${reserves.map((criterion) => criterion.id).join(", ")}. La livraison reste une PR partielle.`;
+const RESERVED_PAUSE_SCOPE = {
+  browser: "Les critères ciblés par la reprise sont acceptés par la validation indépendante.",
+  local: "Les critères ciblés par la reprise sont acceptés par la validation locale seulement : la vérification dans le navigateur n’a pas été lancée, car un critère laissé en réserve bloque la validation locale.",
+};
+
+export function autonomousReservedCriteriaPauseReason(reserves: CriterionReference[], browserVerified: boolean): string {
+  const scope = browserVerified ? RESERVED_PAUSE_SCOPE.browser : RESERVED_PAUSE_SCOPE.local;
+  return `${scope} Les critères laissés en réserve par l’utilisateur restent non vérifiés : ${reserves.map((criterion) => criterion.id).join(", ")}. La livraison reste une PR partielle.`;
 }
 
 export function resolveAutonomousResumeTargets(targets: AutonomousResumeTarget[], criteria: QualityCriterion[], gate: Pick<QualityGate, "requiredCriteria" | "verifiedCriteria">): { ok: true; plan: AutonomousResumePlan } | { ok: false; result: string } {

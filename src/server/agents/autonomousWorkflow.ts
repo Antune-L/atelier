@@ -451,8 +451,9 @@ export class AutonomousWorkflow {
       await this.pause(ticketId, "The same independently observed criterion failure exhausted its repair allowance.");
       return;
     }
-    if (reservedFailureOnly && this.accepted(ticket, run, run.kind === "functional", reserved)) {
-      await this.pause(ticketId, autonomousReservedCriteriaPauseReason(reservedCriteria));
+    const functionalRun = run.kind === "functional";
+    if (reservedFailureOnly && this.accepted(ticket, run, functionalRun, reserved)) {
+      await this.pause(ticketId, autonomousReservedCriteriaPauseReason(reservedCriteria, functionalRun));
       return;
     }
     if (correctable && state.corrections < maxCorrections && Date.now() < this.workDeadline(state)) {

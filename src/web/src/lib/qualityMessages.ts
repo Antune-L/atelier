@@ -76,6 +76,7 @@ const QUALITY_MESSAGES: Readonly<Record<string, string>> = {
   "Validation port allocation failed.": "L’attribution d’un port pour la validation a échoué.",
   "Validation workspace cleanup timed out.": "Le délai de nettoyage de la copie de validation est dépassé.",
   "Quality validation is unavailable.": "La validation est indisponible.",
+  "Autonomous preview deployment is no longer authorized by the active ticket state.": "Le déploiement de l’aperçu n’est plus autorisé par l’état actuel de la carte.",
   "A quality iteration is already active for this ticket.": "Un cycle de correction ou de reprise est déjà en cours pour ce ticket.",
   "A quality iteration is already active for this ticket": "Un cycle de correction ou de reprise est déjà en cours pour ce ticket.",
   "A quality iteration is already active for this PR": "Un cycle de correction ou de reprise est déjà en cours pour cette PR.",

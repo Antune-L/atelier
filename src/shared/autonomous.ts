@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { qualityCriterionSchema, qualityScenarioInteractionSchema } from "./quality.ts";
+import { QUALITY_MAX_OBSERVATION_LENGTH, qualityCriterionSchema, qualityScenarioInteractionSchema } from "./quality.ts";
 
 export const AUTONOMOUS_DEFAULT_MAX_CORRECTIONS = 3;
 export const AUTONOMOUS_MAX_CORRECTIONS = 3;
@@ -20,13 +20,27 @@ export const AUTONOMOUS_MINUTE_MS = 60_000;
 export const autonomousMaxStartsSchema = z.number().int().positive().max(AUTONOMOUS_MAX_STARTS);
 export const autonomousFinalizationMinutesSchema = z.number().int().positive().max(AUTONOMOUS_MAX_FINALIZATION_MINUTES);
 export const autonomousMaxPublicationAttemptsSchema = z.number().int().positive().max(AUTONOMOUS_MAX_PUBLICATION_ATTEMPTS);
+const AUTONOMOUS_RESUME_TARGET_ACTIONS = ["verify", "fix"] as const;
+export const autonomousResumeTargetSchema = z.object({
+  criterionId: z.string().trim().min(1),
+  action: z.enum(AUTONOMOUS_RESUME_TARGET_ACTIONS),
+  observation: z.string().trim().min(1).max(QUALITY_MAX_OBSERVATION_LENGTH).optional(),
+});
+export type AutonomousResumeTarget = z.infer<typeof autonomousResumeTargetSchema>;
 export const autonomousResumeSchema = z.object({
   action: z.enum(["resume", "publish", "extend"]),
   additionalStarts: autonomousMaxStartsSchema.optional(),
   additionalMinutes: z.number().int().positive().max(AUTONOMOUS_MAX_TIMEOUT_MINUTES).optional(),
   additionalCorrections: z.number().int().positive().max(AUTONOMOUS_MAX_CORRECTIONS).optional(),
-});
+  targets: z.array(autonomousResumeTargetSchema).min(1).optional(),
+})
+  .refine((input) => input.targets === undefined || input.action !== "publish", { message: "Targets are only valid when resuming or extending", path: ["targets"] })
+  .refine((input) => input.targets === undefined || new Set(input.targets.map((target) => target.criterionId)).size === input.targets.length, { message: "Target criterion ids must be unique", path: ["targets"] });
 export type AutonomousResumeInput = z.infer<typeof autonomousResumeSchema>;
+
+export function autonomousResumeConsumesCorrection(input: Pick<AutonomousResumeInput, "targets">): boolean {
+  return input.targets?.some((target) => target.action === "fix") === true;
+}
 
 export const autonomousDeliverySchema = z.enum(["pr_only", "merge"]);
 export type AutonomousDelivery = z.infer<typeof autonomousDeliverySchema>;

@@ -8,7 +8,7 @@ import type { DependencyLaunch, DependencyPrObservation, DependencyStatus } from
 
 import { QUALITY_HISTORY_VERSION, QUALITY_HISTORY_EVENT_LIMIT, QUALITY_HISTORY_BYTE_LIMIT, QUALITY_HISTORY_SUMMARY_LIMIT, QUALITY_HISTORY_PAGE_LIMIT, QUALITY_HISTORY_DEFAULT_PAGE_SIZE, qualityActionSchema, qualityRequestSchema } from "../../shared/qualityHistory.ts";
 import type { QualityAction, QualityActionInput, QualityActionPage, QualityRequest, QualityRequestPage } from "../../shared/qualityHistory.ts";
-import { AUTONOMOUS_DEFAULT_MAX_STARTS, AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS, autonomousMaxStartsSchema, autonomousFinalizationMinutesSchema, autonomousMaxPublicationAttemptsSchema, AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, serializeAutonomousState, AutonomousExecutionError, autonomousResumeSchema, AUTONOMOUS_MAX_ENVIRONMENT_RETRIES, AUTONOMOUS_MAX_SAME_FAILURE_REPAIRS, AUTONOMOUS_MINUTE_MS, autonomousStateSchema, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousTimeoutMinutesSchema } from "../../shared/autonomous.ts";
+import { AUTONOMOUS_DEFAULT_MAX_STARTS, AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS, autonomousMaxStartsSchema, autonomousFinalizationMinutesSchema, autonomousMaxPublicationAttemptsSchema, AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, serializeAutonomousState, AutonomousExecutionError, autonomousResumeSchema, autonomousResumeConsumesCorrection, AUTONOMOUS_MAX_ENVIRONMENT_RETRIES, AUTONOMOUS_MAX_SAME_FAILURE_REPAIRS, AUTONOMOUS_MINUTE_MS, autonomousStateSchema, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousTimeoutMinutesSchema } from "../../shared/autonomous.ts";
 import type { AutonomousDelivery, AutonomousState, AutonomousStartKind, AutonomousResumeInput } from "../../shared/autonomous.ts";
 
 import {
@@ -194,6 +194,12 @@ export interface ReviewPass {
   decisions: ReviewPassDecisions;
   publicationIntent: ReviewPublicationIntent | null;
   userStateCorrupt: boolean;
+}
+
+function targetedCorrections(grant: AutonomousResumeInput, corrections: number, maxCorrections: number): number {
+  if (!autonomousResumeConsumesCorrection(grant)) return corrections;
+  if (corrections >= maxCorrections) throw new Error("A targeted correction requires a remaining correction; an explicit additional correction is required");
+  return corrections + 1;
 }
 
 /** Attach the runtime-derived clickable addresses to a persisted worktree session row. */
@@ -789,7 +795,8 @@ export class Store {
     });
   }
 
-  resumeAutonomousExecution(ticketId: string, now = Date.now()): AutonomousState {
+  resumeAutonomousExecution(ticketId: string, input: AutonomousResumeInput = { action: "resume" }, now = Date.now()): AutonomousState {
+    const grant = autonomousResumeSchema.parse(input);
     return this.transaction(() => {
       const ticket = this.getTicket(ticketId);
       if (!ticket?.autonomous) throw new Error("An autonomous ticket is required to resume execution");
@@ -800,7 +807,7 @@ export class Store {
       if (execution.closure.status !== "confirmed") throw new Error("Previous writer closure must be confirmed before resuming execution");
       if (state.hostMutation !== null || state.deliveryConfirmation !== null) throw new Error("Reconcile host mutation or delivery confirmation before resuming execution");
       if (now >= execution.deadlineAt || execution.starts.length >= execution.maxStarts) throw new Error("No remaining execution allowance; an explicit additional allowance is required");
-      const next = autonomousStateSchema.parse({ ...state, phase: "planning", environmentRetries: 0, execution: {
+      const next = autonomousStateSchema.parse({ ...state, phase: "planning", environmentRetries: 0, corrections: targetedCorrections(grant, state.corrections, execution.maxCorrections), execution: {
         ...execution, generation: execution.generation + 1,
         workRevokedAt: null, revocationReason: null, userStopRequestedAt: null, finalizationStartedAt: null, finalizationDeadlineAt: null, failureRepairs: [],
         maxPublicationAttempts: execution.publicationAttempts + (ticket.autonomousMaxPublicationAttempts ?? AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS),
@@ -852,10 +859,11 @@ export class Store {
       const deadlineAt = Math.max(now, execution.deadlineAt) + (grant.additionalMinutes ?? 0) * AUTONOMOUS_MINUTE_MS;
       if (deadlineAt <= now) throw new Error("The work grant must provide a future deadline");
       if (execution.starts.length >= execution.maxStarts + (grant.additionalStarts ?? 0)) throw new Error("The work grant must provide additional starts");
-      const next = autonomousStateSchema.parse({ ...state, phase: "planning", environmentRetries: 0, execution: {
+      const maxCorrections = execution.maxCorrections + (grant.additionalCorrections ?? 0);
+      const next = autonomousStateSchema.parse({ ...state, phase: "planning", environmentRetries: 0, corrections: targetedCorrections(grant, state.corrections, maxCorrections), execution: {
         ...execution, generation: execution.generation + 1,
         maxStarts: execution.maxStarts + (grant.additionalStarts ?? 0),
-        maxCorrections: execution.maxCorrections + (grant.additionalCorrections ?? 0),
+        maxCorrections,
         deadlineAt,
         workRevokedAt: null, revocationReason: null, userStopRequestedAt: null, finalizationStartedAt: null, finalizationDeadlineAt: null, failureRepairs: [],
         maxPublicationAttempts: execution.publicationAttempts + (ticket.autonomousMaxPublicationAttempts ?? AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS),

@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import { ORCHESTRATOR_LABELS } from "@shared/constants";
 import { QUALITY_MAX_OBSERVATION_LENGTH, latestAcceptanceSnapshot, setQualityCriteriaSchema } from "@shared/quality";
-import type { ManualQualityEvidenceInput, QualityCriteriaSnapshot, QualityCriterion, QualityEvidence, QualityGate, TicketQuality } from "@shared/quality";
+import type { ManualQualityEvidenceInput, QualityCriteriaSnapshot, QualityCriterion, QualityEvidence, QualityGate, QualityValidationRun, TicketQuality } from "@shared/quality";
 
 import { QualityResult, QualitySection, evidenceProvenance, qualityEvidenceResult } from "@/components/ticket-detail/QualityResults";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,43 @@ interface QualityCriteriaPanelProps {
   onSave: (criteria: QualityCriterion[]) => Promise<void>;
   onEvidence: (input: ManualQualityEvidenceInput) => Promise<void>;
   onOpenEvidence: (evidence: QualityEvidence) => void;
+}
+
+export interface QualityCriterionRow {
+  criterion: QualityCriterion;
+  index: number;
+  evidence: QualityEvidence | undefined;
+  run: QualityValidationRun | undefined;
+  evidenceCurrent: boolean;
+  verified: boolean;
+  result: ReturnType<typeof qualityEvidenceResult>;
+  priority: number;
+}
+
+export function qualityCriterionRows(quality: TicketQuality, gate: Pick<QualityGate, "currentRunIds" | "verifiedCriteria">): QualityCriterionRow[] {
+  const snapshot = latestAcceptanceSnapshot(quality);
+  if (snapshot === undefined) return [];
+  return snapshot.criteria.map((criterion, index) => {
+    const matchingEvidence = quality.evidence.filter((item) => item.criterionId === criterion.id && quality.runs.some((run) => run.id === item.runId && run.criteriaSnapshotId === snapshot.id));
+    const evidence = matchingEvidence.filter((item) => gate.currentRunIds.includes(item.runId)).at(-1) ?? matchingEvidence.at(-1);
+    const run = quality.runs.find((item) => item.id === evidence?.runId);
+    const evidenceCurrent = run !== undefined && gate.currentRunIds.includes(run.id);
+    const verified = gate.verifiedCriteria.includes(criterion.id);
+    let result: ReturnType<typeof qualityEvidenceResult> = "unverified";
+    if (evidence !== undefined) result = qualityEvidenceResult(evidence.status, evidenceCurrent, run?.evidenceAccepted === true, run?.simulated === true);
+    if (evidence !== undefined && !evidenceCurrent) result = "stale";
+    if (result === "passed") result = "unverified";
+    if (verified) result = "passed";
+    let priority = CRITERION_PRIORITY.optional;
+    if (criterion.required) priority = CRITERION_PRIORITY.required;
+    if (verified) priority = CRITERION_PRIORITY.verified;
+    if (result === "failed") priority = CRITERION_PRIORITY.failed;
+    return { criterion, index, evidence, run, evidenceCurrent, verified, result, priority };
+  }).sort((left, right) => left.priority - right.priority || left.index - right.index);
+}
+
+export function QualityCriterionReference({ criterion, index }: { criterion: QualityCriterion; index: number }) {
+  return <p className="flex flex-wrap items-center gap-1 text-2xs text-muted-foreground"><FileText className="h-3 w-3" />{SOURCE_LABELS[criterion.source]} · critère {index + 1} · {criterion.required ? "requis" : "facultatif"}</p>;
 }
 
 function newCriterion(): QualityCriterion {
@@ -100,24 +137,7 @@ export function QualityCriteriaPanel({ quality, gate, busy, onSave, onEvidence, 
   const planner = quality.runs.find((run) => run.criteriaSnapshotId === snapshot?.id && run.kind === "full" && run.provider !== null);
   let provenance = snapshot === undefined ? "" : CREATOR_LABELS[snapshot.createdBy];
   if (snapshot?.createdBy === "agent" && planner?.provider !== null && planner?.provider !== undefined) provenance = `Préparés par ${ORCHESTRATOR_LABELS[planner.provider]}`;
-  const rows = snapshot?.criteria.map((criterion, index) => {
-
-    const matchingEvidence = quality.evidence.filter((item) => item.criterionId === criterion.id && quality.runs.some((run) => run.id === item.runId && run.criteriaSnapshotId === snapshot.id));
-    const evidence = matchingEvidence.filter((item) => gate.currentRunIds.includes(item.runId)).at(-1) ?? matchingEvidence.at(-1);
-    const run = quality.runs.find((item) => item.id === evidence?.runId);
-    const evidenceCurrent = run !== undefined && gate.currentRunIds.includes(run.id);
-    const verified = gate.verifiedCriteria.includes(criterion.id);
-    let result: ReturnType<typeof qualityEvidenceResult> = "unverified";
-    if (evidence !== undefined) result = qualityEvidenceResult(evidence.status, evidenceCurrent, run?.evidenceAccepted === true, run?.simulated === true);
-    if (evidence !== undefined && !evidenceCurrent) result = "stale";
-    if (result === "passed") result = "unverified";
-    if (verified) result = "passed";
-    let priority = CRITERION_PRIORITY.optional;
-    if (criterion.required) priority = CRITERION_PRIORITY.required;
-    if (verified) priority = CRITERION_PRIORITY.verified;
-    if (result === "failed") priority = CRITERION_PRIORITY.failed;
-    return { criterion, index, evidence, run, evidenceCurrent, verified, result, priority };
-  }).sort((left, right) => left.priority - right.priority || left.index - right.index) ?? [];
+  const rows = qualityCriterionRows(quality, gate);
   return (
     <QualitySection number={3} title="Critères d’acceptation" action={<Button variant="ghost" size="sm" disabled={busy} onClick={() => setEditing(true)}>{snapshot === undefined ? "Définir les critères" : "Modifier les critères"}</Button>}>
       {snapshot === undefined ? <div className="rounded border border-border p-3 text-xs text-muted-foreground">Les critères seront préparés automatiquement depuis le ticket lorsque vous lancerez sa vérification. Vous pouvez aussi les définir manuellement.</div> : (
@@ -129,7 +149,7 @@ export function QualityCriteriaPanel({ quality, gate, busy, onSave, onEvidence, 
               {rows.map(({ criterion, index, evidence, run, evidenceCurrent, verified, result }) => {
                 return (
                   <div key={criterion.id} className="px-3 py-3">
-                    <div className="flex items-start justify-between gap-3"><div className="min-w-0 space-y-1"><p className="text-xs">{formatQualityCriterionText(criterion, snapshot.createdBy)}</p><p className="flex flex-wrap items-center gap-1 text-2xs text-muted-foreground"><FileText className="h-3 w-3" />{SOURCE_LABELS[criterion.source]} · critère {index + 1} · {criterion.required ? "requis" : "facultatif"}</p></div><QualityResult status={result} /></div>
+                    <div className="flex items-start justify-between gap-3"><div className="min-w-0 space-y-1"><p className="text-xs">{formatQualityCriterionText(criterion, snapshot.createdBy)}</p><QualityCriterionReference criterion={criterion} index={index} /></div><QualityResult status={result} /></div>
                     <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                       {evidence === undefined ? <span className="text-2xs text-muted-foreground">Aucune preuve enregistrée</span> : <button type="button" className="flex min-w-0 items-center gap-1 text-left text-2xs text-muted-foreground hover:text-foreground" onClick={() => onOpenEvidence(evidence)}>{evidenceProvenance(evidence, run)}{!evidenceCurrent && " · preuve obsolète"}<ChevronRight className="h-3 w-3 shrink-0" /></button>}
                       <button type="button" disabled={busy} className="text-2xs text-muted-foreground hover:text-foreground disabled:opacity-50" onClick={() => setObserving(criterion)}>Ajouter une observation</button>

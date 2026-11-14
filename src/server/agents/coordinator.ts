@@ -1,9 +1,10 @@
 import { nanoid } from "nanoid";
 
-import { autonomousPlanInputSchema, autonomousResumeSchema } from "../../shared/autonomous.ts";
+import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, autonomousPlanInputSchema, autonomousResumeConsumesCorrection, autonomousResumeSchema } from "../../shared/autonomous.ts";
 import type { AutonomousPlanInput, AutonomousResumeInput } from "../../shared/autonomous.ts";
 import { ACTIVE_STAGES, ATELIER_SLOT_ID, AUTO_NUDGE_MAX, DEFAULT_PLAN_PARALLEL_IMPLEMENTERS, FEASIBILITY_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
+import { latestAcceptanceSnapshot } from "../../shared/quality.ts";
 import type { ReviewFlag, ReviewLevel } from "../../shared/constants.ts";
 import { ATELIER_BOARD_TOOL_NAMES, AUTONOMOUS_UNIT_TEST_LOT, deliverAutonomousArgsSchema, qualityArgsSchema, readyForReviewArgsSchema, REVIEW_REASON_MAX_LENGTH, sendToMacArgsSchema, validateAutonomousArgsSchema } from "../../shared/protocol.ts";
 import type { Comment, Ticket, WorkerToolName } from "../../shared/schemas.ts";
@@ -40,6 +41,8 @@ import type { AgentTurnUsage } from "../system/agentSession.ts";
 import { hasStructuredPrDescription, maxReviewLevel } from "../system/vcs/prDescription.ts";
 
 import type { AtelierManager } from "./atelierManager.ts";
+import { AUTONOMOUS_RESUME_PLANNING_PROMPT, AUTONOMOUS_RESUME_PROMPT, AUTONOMOUS_RESUME_WITHOUT_REVIEW_PROMPT, AUTONOMOUS_TARGET_EVIDENCE_STATUS, AUTONOMOUS_TARGET_NO_CORRECTION, AUTONOMOUS_TARGETS_UNAVAILABLE, autonomousTargetedResumePrompt, resolveAutonomousResumeTargets } from "./autonomousResumeTargets.ts";
+import type { AutonomousResumePlan } from "./autonomousResumeTargets.ts";
 import type { DelegationManager } from "./delegationManager.ts";
 import { isFirstFeatureDelivery } from "./prDescription.ts";
 import { acceptsReviewLimit, allowedReviewPasses, unreviewedChangesReport } from "./reviewPass.ts";
@@ -92,8 +95,9 @@ const NO_PROTOCOL_STALL_REASON = "tour terminé sans protocole";
 const REVIEW_GATE_REJECTED_EVENT = "review_gate_rejected";
 const AUTONOMOUS_DELIVERY_POLL_MS = 5_000;
 const AUTONOMOUS_RESUME_REQUESTED_EVENT = "autonomous_resume_requested";
-const AUTONOMOUS_RESUME_PROMPT = "Reprise demandée par l’utilisateur. Si le worktree est propre et poussé et que la dernière review indépendante couvre le code courant, appelle validate_autonomous puis termine ton tour. Sinon, termine d’abord la correction, la review, le commit et le push. N’ouvre ni ne fusionne de PR.";
-const AUTONOMOUS_RESUME_WITHOUT_REVIEW_PROMPT = "Reprise demandée par l’utilisateur. Ce ticket n’a pas de plan d’implémentation persistant (submit_implementation_plan n’a jamais été appelé ; le plan autonome figé ne compte pas) et sa livraison reste une PR relue par un humain. Si le budget de review est épuisé, ne relance pas les reviewers et n’appelle pas fail pour ce motif : le backend accepte le code modifié après la dernière passe et le signale dans la PR. Commit et pousse si nécessaire, puis appelle validate_autonomous et termine ton tour. N’ouvre ni ne fusionne de PR.";
+const LEGACY_AUTONOMOUS_RESUME_UNREACHABLE = "The implementation session is unreachable. Relaunch the ticket before resuming its autonomous run.";
+const LEGACY_AUTONOMOUS_RESUME_REQUESTED = "The implementation session was asked to resume autonomous validation.";
+const AUTONOMOUS_RESUME_IN_PROGRESS = "Une reprise est déjà en cours pour cette carte.";
 const PR_DESCRIPTION_REFUSED_EVENT = "pr_description_refused";
 const DELIVERY_DONE_EVENT = "done";
 const READY_FOR_REVIEW_EVENT = "ready_for_review";
@@ -1278,24 +1282,83 @@ export class AgentCoordinator {
     return "";
   }
 
-  private autonomousResumePrompt(ticket: Ticket): string {
-    return acceptsReviewLimit(ticket) && this.store.getImplementationPlan(ticket.id) === null ? AUTONOMOUS_RESUME_WITHOUT_REVIEW_PROMPT : AUTONOMOUS_RESUME_PROMPT;
+  private autonomousResumeWithoutReview(ticket: Ticket): boolean {
+    return acceptsReviewLimit(ticket) && this.store.getImplementationPlan(ticket.id) === null;
+  }
+
+  private autonomousResumePrompt(ticket: Ticket, plan: AutonomousResumePlan | null): string {
+    const withoutReview = this.autonomousResumeWithoutReview(ticket);
+    if (plan === null) return withoutReview ? AUTONOMOUS_RESUME_WITHOUT_REVIEW_PROMPT : AUTONOMOUS_RESUME_PROMPT;
+    const state = this.store.getTicket(ticket.id)?.autonomousState;
+    const correction = autonomousResumeConsumesCorrection({ targets: plan.targeted.map(({ target }) => target) }) && state ? { used: state.corrections, max: state.execution?.maxCorrections ?? ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS } : null;
+    return autonomousTargetedResumePrompt(plan, { withoutReview, correction });
+  }
+
+  private async planAutonomousResumeTargets(ticket: Ticket, input: AutonomousResumeInput): Promise<{ ok: true; plan: AutonomousResumePlan | null } | { ok: false; result: string }> {
+    if (input.targets === undefined) return { ok: true, plan: null };
+    if (!this.quality) return { ok: false, result: AUTONOMOUS_TARGETS_UNAVAILABLE };
+    let resolved: ReturnType<typeof resolveAutonomousResumeTargets>;
+    try {
+      const criteria = latestAcceptanceSnapshot(this.quality.get(ticket.id))?.criteria ?? [];
+      resolved = resolveAutonomousResumeTargets(input.targets, criteria, await this.quality.gate(ticket.id, "reservations"));
+    } catch (error) {
+      return { ok: false, result: getErrorMessage(error) };
+    }
+    if (!resolved.ok || !autonomousResumeConsumesCorrection(input)) return resolved;
+    const state = ticket.autonomousState;
+    const maxCorrections = state?.execution?.maxCorrections ?? ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS;
+    const granted = input.action === "extend" ? input.additionalCorrections ?? 0 : 0;
+    if ((state?.corrections ?? 0) >= maxCorrections + granted) return { ok: false, result: AUTONOMOUS_TARGET_NO_CORRECTION };
+    return resolved;
+  }
+
+  private async recordAutonomousTargetObservations(ticketId: string, plan: AutonomousResumePlan | null): Promise<void> {
+    if (plan === null || !this.quality) return;
+    for (const { target } of plan.targeted) {
+      if (target.observation === undefined) continue;
+      await this.quality.recordManualEvidence(ticketId, { criterionId: target.criterionId, observation: target.observation, status: AUTONOMOUS_TARGET_EVIDENCE_STATUS[target.action] });
+    }
+  }
+
+  private async resumeLegacyAutonomous(ticket: Ticket, input: AutonomousResumeInput): Promise<ToolResult> {
+    const state = ticket.autonomousState;
+    if (state?.phase !== "paused" || state.hostMutation) return { ok: false, result: "Only a paused autonomous run without an unresolved host operation can be resumed." };
+    if (input.targets === undefined) {
+      if (!this.sessionHub.sendEvent(ticket.id, { type: "nudge", message: this.autonomousResumePrompt(ticket, null) })) return { ok: false, result: LEGACY_AUTONOMOUS_RESUME_UNREACHABLE };
+      this.store.logEvent(ticket.id, AUTONOMOUS_RESUME_REQUESTED_EVENT, {});
+      return { ok: true, result: LEGACY_AUTONOMOUS_RESUME_REQUESTED };
+    }
+    const parsed = autonomousResumeSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const targeting = await this.planAutonomousResumeTargets(ticket, parsed.data);
+    if (!targeting.ok) return targeting;
+    try {
+      await this.recordAutonomousTargetObservations(ticket.id, targeting.plan);
+    } catch (error) {
+      return { ok: false, result: getErrorMessage(error) };
+    }
+    const consumesCorrection = autonomousResumeConsumesCorrection(parsed.data);
+    if (consumesCorrection) this.store.updateTicket(ticket.id, { autonomousState: { ...state, corrections: state.corrections + 1 } });
+    if (!this.sessionHub.sendEvent(ticket.id, { type: "nudge", message: this.autonomousResumePrompt(ticket, targeting.plan) })) {
+      if (consumesCorrection) this.store.updateTicket(ticket.id, { autonomousState: state });
+      return { ok: false, result: LEGACY_AUTONOMOUS_RESUME_UNREACHABLE };
+    }
+    this.store.logEvent(ticket.id, AUTONOMOUS_RESUME_REQUESTED_EVENT, { targets: parsed.data.targets });
+    return { ok: true, result: LEGACY_AUTONOMOUS_RESUME_REQUESTED };
   }
 
   async resumeAutonomous(ticketId: string, input: AutonomousResumeInput = { action: "resume" }): Promise<ToolResult> {
     const ticket = this.store.getTicket(ticketId);
     const state = ticket?.autonomousState;
     if (!ticket?.autonomous || !state) return { ok: false, result: "Autonomous resume is unavailable for this ticket." };
-    if (!state.execution) {
-      if (state.phase !== "paused" || state.hostMutation) return { ok: false, result: "Only a paused autonomous run without an unresolved host operation can be resumed." };
-      if (!this.sessionHub.sendEvent(ticketId, { type: "nudge", message: this.autonomousResumePrompt(ticket) })) return { ok: false, result: "The implementation session is unreachable. Relaunch the ticket before resuming its autonomous run." };
-      this.store.logEvent(ticketId, AUTONOMOUS_RESUME_REQUESTED_EVENT, {});
-      return { ok: true, result: "The implementation session was asked to resume autonomous validation." };
-    }
+    if (!state.execution) return this.resumeLegacyAutonomous(ticket, input);
     const parsed = autonomousResumeSchema.safeParse(input);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
-    if (this.userRecoveryOperations.has(ticketId)) return { ok: false, result: "Une reprise est déjà en cours pour cette carte." };
+    if (this.userRecoveryOperations.has(ticketId)) return { ok: false, result: AUTONOMOUS_RESUME_IN_PROGRESS };
     if (state.phase === "completed" || ticket.archived || ticket.column === "abandoned") return { ok: false, result: "Cette exécution ne peut plus être reprise." };
+    const targeting = await this.planAutonomousResumeTargets(ticket, parsed.data);
+    if (!targeting.ok) return targeting;
+    if (this.userRecoveryOperations.has(ticketId)) return { ok: false, result: AUTONOMOUS_RESUME_IN_PROGRESS };
     this.userRecoveryOperations.add(ticketId);
     try {
       this.autonomousWorkflow?.assertResumeConfiguration?.(ticketId);
@@ -1307,13 +1370,14 @@ export class AgentCoordinator {
         void this.slots.publishAutonomousPartial(ticketId, "Publication explicitement demandée par l’utilisateur.").catch(logRejection("publication partielle impossible", ticketId));
         return { ok: true, result: "La réserve de publication explicitement accordée est ouverte. Le backend réconcilie la même PR en brouillon.", pending: true };
       }
+      await this.recordAutonomousTargetObservations(ticketId, targeting.plan);
       if (parsed.data.action === "extend") this.store.extendAutonomousExecution(ticketId, parsed.data);
-      else this.store.resumeAutonomousExecution(ticketId);
+      else this.store.resumeAutonomousExecution(ticketId, parsed.data);
       const checkpoint = await this.autonomousWorkflow?.prepareResume?.(ticketId) ?? "validation";
       await this.slots.resumeAutonomousSession(ticketId);
       const prompt = checkpoint === "planning"
-        ? "Reprise explicite avec l’enveloppe restante. Termine le plan autonome initial avant toute modification et conserve tous les travaux précédents."
-        : this.autonomousResumePrompt(ticket);
+        ? AUTONOMOUS_RESUME_PLANNING_PROMPT
+        : this.autonomousResumePrompt(ticket, targeting.plan);
       if (!this.sessionHub.sendEvent(ticketId, { type: "nudge", message: prompt })) throw new Error("La session de reprise est inaccessible.");
       this.store.logEvent(ticketId, AUTONOMOUS_RESUME_REQUESTED_EVENT, { ...parsed.data, checkpoint });
       return { ok: true, result: "La reprise est démarrée dans le slot conservé, avec la même PR et les crédits cumulés." };

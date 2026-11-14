@@ -178,9 +178,9 @@ export async function auditAutonomousSources(options: Omit<QualitySessionOptions
   for (const obligation of output?.obligations ?? []) {
     if (!obligation.criterionIds.every((id) => options.criteria.some((criterion) => criterion.id === id))) attributable = false;
     if (obligation.status === "process" && obligation.processVerification === null) attributable = false;
-    if (!processObligation(obligation) && obligation.criterionIds.length === 0) attributable = false;
+    if (obligation.status === "covered" && obligation.criterionIds.length === 0) attributable = false;
     if (!await sourceObligationAttributed(obligation, options.sources, session.observations, options.cwd)) attributable = false;
-    const citationRequired = !processObligation(obligation) || obligation.implementation !== null;
+    const citationRequired = obligation.status === "covered" || obligation.implementation !== null;
     if (citationRequired && (obligation.implementation === null || attributedQualityCitation(obligation.implementation, session.observations, options.cwd) === null)) attributable = false;
   }
   for (const reference of options.sources.references) {

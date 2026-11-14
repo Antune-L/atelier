@@ -6,6 +6,7 @@ import type { Ticket } from "@shared/schemas";
 import { AutonomousResumeSection, RecoveryLink } from "@/components/ticket-detail/AutonomousResumeSection";
 import { AutonomousWorkspacesLink } from "@/components/ticket-detail/AutonomousWorkspacesLink";
 import { Button } from "@/components/ui/button";
+import { ConfirmPopover } from "@/components/ui/confirm";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/display";
 import { formatQualityMessage } from "@/lib/qualityMessages";
@@ -58,6 +59,8 @@ export function AutonomousRecoveryPanel({ ticket, quality, gate, pending, act, o
   const confirmedPrUrl = execution?.publication.status === "confirmed" ? execution.publication.prUrl : null;
   const reason = execution?.revocationReason;
   const workRetained = execution?.closure.retention === "retained";
+  // An abandoned card keeps its slot for recovery until the user explicitly lets the work go.
+  const releasable = ticket.column === "abandoned" && ticket.slotId !== null && execution !== undefined && state.hostMutation === null && execution.closure.status !== "unknown";
 
   return <div role="status" className="space-y-3 rounded border border-warning/30 bg-warning/5 px-3 py-3 text-xs">
     <p className="font-medium">{PHASE_LABELS[state.phase]}</p>
@@ -72,6 +75,12 @@ export function AutonomousRecoveryPanel({ ticket, quality, gate, pending, act, o
       <div><Button size="sm" variant="outline" disabled={pending} onClick={() => void act(() => api.resumeAutonomous(ticket.id, { action: "publish" }))}>{state.hostMutation !== null ? "Réconcilier puis réessayer la publication" : "Réessayer la publication partielle"}</Button></div>
       <p className="text-muted-foreground">Réessayer la publication est une décision explicite : après réconciliation confirmée, elle autorise une réserve de {publicationRetryMinutes} minutes et au maximum {publicationRetryAttempts} tentative(s). Aucune allocation n’est renouvelée automatiquement.</p>
     </>}
+    {releasable && <div className="space-y-1">
+      <ConfirmPopover title="Libérer le travail conservé" description={`Le worktree du slot ${ticket.slotId} et la branche locale${ticket.branch ? ` ${ticket.branch}` : ""} seront supprimés. La branche distante et la PR éventuelle sont conservées.`} confirmLabel="Libérer" destructive onConfirm={() => act(() => api.releaseRetainedWork(ticket.id))}>
+        <Button size="sm" variant="outline" disabled={pending}>Libérer le travail conservé</Button>
+      </ConfirmPopover>
+      <p className="text-muted-foreground">La carte est abandonnée mais occupe encore le slot {ticket.slotId}. Récupérez d’abord ce qui n’a pas été poussé.</p>
+    </div>}
     {(workRetained || onOpenTerminal) && <div className="flex flex-wrap gap-3">
       {workRetained && <AutonomousWorkspacesLink ticketId={ticket.id} />}
       {onOpenTerminal && <RecoveryLink onClick={onOpenTerminal}>Voir le journal du travail conservé</RecoveryLink>}

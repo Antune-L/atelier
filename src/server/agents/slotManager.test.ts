@@ -189,6 +189,82 @@ test("abandon moves the card even when its slot was already handed to another ti
   }
 });
 
+function retainedWorkHarness() {
+  const db = createDatabase(":memory:");
+  const store = new Store(db);
+  store.createProject("test-proj", {
+    label: "Test",
+    repoPath: "/tmp/repo",
+    baseBranch: "main",
+    commitTimeoutMs: 60_000,
+    defaultAutoMerge: false,
+    defaultAddScreenshots: false,
+  });
+  initProjectRegistry(store);
+  const ticket = store.createTicket(makeTicket({ autonomous: true, branch: "feat/retained" }));
+  store.updateTicket(ticket.id, { column: "implementing", slotId: 1 });
+  store.updateSlot(1, { ticketId: ticket.id, status: "busy" });
+  store.ensureAutonomousExecution(ticket.id);
+
+  const system = new RelaunchSystem();
+  const hub = new ClientHub(store);
+  const sessionHub = new SessionHub(system);
+  const notifier = new Notifier(hub);
+  const lifecycle = new TicketLifecycle(store, hub, notifier);
+  const slots = new SlotManager(store, system, hub, sessionHub, notifier, lifecycle, { projectRoot: "/tmp" });
+  let quiesced = true;
+  slots.setAutonomousRecovery({ quiesce: async () => quiesced, hasWriters: () => false, workspaces: async () => [] });
+  return {
+    db, store, slots, ticketId: ticket.id,
+    failQuiesce: () => { quiesced = false; },
+    close: async () => {
+      sessionHub.disconnectAll();
+      await sessionHub.drainClosingSessions();
+      db.close();
+    },
+  };
+}
+
+test("an abandoned autonomous card frees its retained slot only when the user releases the work", async () => {
+  const harness = retainedWorkHarness();
+  try {
+    await harness.slots.abandonTicket(harness.ticketId);
+    expect(harness.store.getTicket(harness.ticketId)?.slotId).toBe(1);
+    expect(harness.store.getSlot(1)?.status).toBe("interrupted");
+
+    const released = await harness.slots.releaseRetainedWork(harness.ticketId);
+    expect(released.column).toBe("abandoned");
+    expect(released.slotId).toBeNull();
+    expect(released.autonomousState?.execution?.closure.retention).toBe("released");
+    expect(harness.store.getSlot(1)).toMatchObject({ ticketId: null, status: "free" });
+  } finally {
+    await harness.close();
+  }
+});
+
+test("releasing retained work keeps the slot when writer closure cannot be confirmed", async () => {
+  const harness = retainedWorkHarness();
+  try {
+    harness.failQuiesce();
+    await harness.slots.abandonTicket(harness.ticketId);
+    await expect(harness.slots.releaseRetainedWork(harness.ticketId)).rejects.toThrow("Writer closure is unconfirmed");
+    expect(harness.store.getTicket(harness.ticketId)?.slotId).toBe(1);
+    expect(harness.store.getSlot(1)?.ticketId).toBe(harness.ticketId);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("releasing retained work is refused for a card that was not abandoned", async () => {
+  const harness = retainedWorkHarness();
+  try {
+    await expect(harness.slots.releaseRetainedWork(harness.ticketId)).rejects.toThrow("Only an abandoned autonomous card");
+    expect(harness.store.getSlot(1)?.ticketId).toBe(harness.ticketId);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("resumeQueuedTickets re-queues recent slotless queued cards and skips week-old ones", async () => {
   const db = createDatabase(":memory:");
   const store = new Store(db);

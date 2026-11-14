@@ -2301,8 +2301,10 @@ export class SlotManager {
     const current = this.store.getTicket(ticket.id);
     if (current?.autonomous && (current.autonomousState?.hostMutation || this.autonomousDeliveries.has(ticket.id) && current.autonomousState?.phase !== "completed")) throw new Error("The autonomous worktree is reserved until its host operation is reconciled.");
     if (current?.autonomousState?.execution) {
-      if (current.autonomousState.phase !== "completed") throw new Error("The partial autonomous worktree is retained for explicit recovery.");
-      if (!await this.closeAutonomousWork(ticket.id)) throw new Error("Writer closure is unconfirmed. The autonomous worktree is retained.");
+      // An abandoned card whose user explicitly released the retained work already confirmed closure.
+      const released = current.column === "abandoned" && current.autonomousState.execution.closure.retention === "released";
+      if (current.autonomousState.phase !== "completed" && !released) throw new Error("The partial autonomous worktree is retained for explicit recovery.");
+      if (!released && !await this.closeAutonomousWork(ticket.id)) throw new Error("Writer closure is unconfirmed. The autonomous worktree is retained.");
     }
     this.clearPhase(ticket.id);
     // Stop the in-process SDK session (no-op for a test/worktree shell slot); kill any tmux shell.
@@ -2389,6 +2391,35 @@ export class SlotManager {
     if (!launched) return "no_slot";
     this.store.logEvent(ticketId, AUTO_MERGE_RESOLVE_EVENT, { reason });
     return "launched";
+  }
+
+  /**
+   * Explicitly discards the work an abandoned autonomous card retained for recovery: once writer
+   * closure is confirmed, removes the worktree and local branch and frees the slot. The remote
+   * branch and any pull request are left untouched.
+   */
+  async releaseRetainedWork(ticketId: string): Promise<Ticket> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket) throw new Error("Ticket not found.");
+    const state = ticket.autonomousState;
+    if (!ticket.autonomous || !state?.execution || ticket.column !== "abandoned") throw new Error("Only an abandoned autonomous card can release its retained work.");
+    const slotId = ticket.slotId;
+    if (slotId === null || this.store.getSlot(slotId)?.ticketId !== ticketId) throw new Error("This card no longer holds a slot.");
+    if (state.hostMutation || this.autonomousDeliveries.has(ticketId)) throw new Error("A host operation is still unreconciled. The retained work is kept.");
+    if (state.execution.closure.retention !== "released" && !await this.closeAutonomousWork(ticketId)) throw new Error("Writer closure is unconfirmed. The retained work is kept.");
+    const closed = this.store.getTicket(ticketId)?.autonomousState;
+    if (closed?.execution && closed.execution.closure.retention !== "released") {
+      this.store.updateTicket(ticketId, { autonomousState: { ...closed, execution: { ...closed.execution, closure: { ...closed.execution.closure, retention: "released" } } } });
+    }
+    const current = this.store.getTicket(ticketId);
+    if (!current) throw new Error("Ticket not found.");
+    await this.releaseSlot(slotId, current);
+    const released = this.store.updateTicket(ticketId, { slotId: null });
+    this.touch(released);
+    this.store.logEvent(ticketId, "retained_work_released", { slotId });
+    log.info("travail conservé libéré", { ticketId, slotId });
+    this.pumpQueue();
+    return released;
   }
 
   async markMerged(ticketId: string, expected?: Ticket): Promise<Ticket> {

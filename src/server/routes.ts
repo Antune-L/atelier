@@ -2050,6 +2050,13 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!outcome.ok) return jsonError(set, HTTP_CONFLICT, outcome.result);
       return { ...outcome, ticket: store.getTicket(params.id), implementationPlan: store.getImplementationPlan(params.id) };
     })
+    .post("/tickets/:id/release-retained-work", async ({ params, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
+      if (!store.getTicket(params.id)) return jsonError(set, HTTP_NOT_FOUND, "Ticket not found.");
+      try {
+        return await slots.releaseRetainedWork(params.id);
+      } catch (error) { return jsonError(set, HTTP_CONFLICT, getErrorMessage(error)); }
+    })
     .get("/tickets/:id/autonomous-workspaces", async ({ params, set }) => {
       if (!store.getTicket(params.id)) return jsonError(set, HTTP_NOT_FOUND, "Ticket not found.");
       return slots.autonomousWorkspaces(params.id);

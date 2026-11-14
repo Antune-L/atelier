@@ -373,6 +373,7 @@ export const api = {
   relaunch: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/relaunch`, { method: "POST" }),
   autonomousWorkspaces: async (id: string): Promise<AutonomousWorkspaces> => autonomousWorkspacesSchema.parse(await request(`/api/tickets/${id}/autonomous-workspaces`)),
   resumeAutonomous: (id: string, input: AutonomousResumeInput = { action: "resume" }): Promise<Ticket> => request(`/api/tickets/${id}/autonomous-resume`, { method: "POST", body: JSON.stringify(input) }),
+  releaseRetainedWork: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/release-retained-work`, { method: "POST" }),
   startTest: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/test`, { method: "POST" }),
   stopTest: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/stop-test`, { method: "POST" }),
   createStealthPr: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/create-pr`, { method: "POST" }),

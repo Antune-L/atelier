@@ -181,6 +181,7 @@ export function isAutonomousParentIncomplete(input: { autonomous?: boolean; auto
 }
 
 export const AUTONOMOUS_RETRY_MIN_REMAINING_MINUTES = 30;
+export const AUTONOMOUS_RETRY_MIN_REMAINING_STARTS = 16;
 
 interface AutonomousRetryLimits {
   autonomousTimeoutMinutes?: number | null;
@@ -201,7 +202,7 @@ export function autonomousRetryInput(limits: AutonomousRetryLimits, state: Auton
   if (execution.deadlineAt - now < AUTONOMOUS_RETRY_MIN_REMAINING_MINUTES * AUTONOMOUS_MINUTE_MS) {
     input.additionalMinutes = limits.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES;
   }
-  if (execution.starts.length >= execution.maxStarts) input.additionalStarts = limits.autonomousMaxStarts ?? AUTONOMOUS_DEFAULT_MAX_STARTS;
+  if (execution.maxStarts - execution.starts.length < AUTONOMOUS_RETRY_MIN_REMAINING_STARTS) input.additionalStarts = limits.autonomousMaxStarts ?? AUTONOMOUS_DEFAULT_MAX_STARTS;
   if (state.corrections >= execution.maxCorrections) input.additionalCorrections = Math.max(1, limits.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS);
   if (input.additionalMinutes === undefined && input.additionalStarts === undefined && input.additionalCorrections === undefined) return { action: "resume" };
   return input;

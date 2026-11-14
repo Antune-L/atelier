@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, readdir } from "node:fs/promises";
+import { lstat, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -1525,13 +1525,7 @@ export class QualityManager {
           this.markClosureUnknown(ticket.id);
           throw new Error("Native session closure is unconfirmed. Its private artifacts and validation workspace are retained.");
         }
-        if (run.environment?.teardownCommand && run.configFingerprint !== configFingerprint(project)) throw new Error("Validation configuration changed; restore it before retrying environment cleanup.");
-        if (run.environment?.teardownCommand) {
-          const result = await this.dependencies.system.runValidationCommand({ cwd: run.environment.directory, command: run.environment.teardownCommand, environment: environmentFor(run.environment, project), timeoutMs: run.environment.timeoutMs ?? QUALITY_DEFAULT_TIMEOUT_MS });
-          if (!commandSucceeded(result)) throw new Error("Recovered validation service teardown failed.");
-        }
-        await this.repoMutex.run(project.repoPath, () => this.dependencies.system.cleanupValidationWorkspace({ ticketId: ticket.id, runId: run.id, repoPath: project.repoPath, commitSha: run.revision }));
-        this.update(run.id, { cleanupStatus: "complete" });
+        await this.cleanupRetainedRun(run, ticket.id, project);
       } catch (error) { this.update(run.id, { cleanupStatus: "failed", error: getErrorMessage(error) }); }
     }
     for (const iteration of this.dependencies.store.listActiveQualityIterations()) {
@@ -1539,6 +1533,41 @@ export class QualityManager {
       this.dependencies.store.updateQualityIteration(iteration.id, { status: "interrupted", diagnostic: "Backend restarted before quality iteration completed.", completedAt: Date.now() });
       this.changed(iteration.ticketId);
     }
+  }
+
+  async reconcileRetainedCleanup(ticketId: string): Promise<boolean> {
+    if (this.active.has(ticketId)) return false;
+    const ticket = this.dependencies.store.getTicket(ticketId);
+    if (!ticket) return false;
+    const project = getProject(ticket.project);
+    let complete = true;
+    for (const run of this.get(ticketId).runs) {
+      if (run.cleanupStatus === "complete" || run.status === "queued" || run.status === "running") continue;
+      try {
+        await this.clearNativeCleanupObligations(run.id);
+        await this.cleanupRetainedRun(run, ticketId, project);
+      } catch (error) {
+        complete = false;
+        this.update(run.id, { cleanupStatus: "failed", error: getErrorMessage(error) });
+      }
+    }
+    return complete;
+  }
+
+  private async clearNativeCleanupObligations(runId: string): Promise<void> {
+    const directory = join(this.dependencies.artifactDirectory ?? join(tmpdir(), "kanban-quality-artifacts"), runId);
+    for (const path of [join(directory, QUALITY_BROWSER_CLEANUP_MARKER), join(directory, "browser", QUALITY_BROWSER_CLEANUP_MARKER)]) await rm(path, { force: true });
+    for (const scope of [directory, join(directory, "browser"), join(directory, "relevance")]) await rm(join(scope, QUALITY_NATIVE_CLEANUP_DIRECTORY), { recursive: true, force: true });
+  }
+
+  private async cleanupRetainedRun(run: QualityValidationRun, ticketId: string, project: ProjectConfig): Promise<void> {
+    if (run.environment?.teardownCommand && run.configFingerprint !== configFingerprint(project)) throw new Error("Validation configuration changed; restore it before retrying environment cleanup.");
+    if (run.environment?.teardownCommand) {
+      const result = await this.dependencies.system.runValidationCommand({ cwd: run.environment.directory, command: run.environment.teardownCommand, environment: environmentFor(run.environment, project), timeoutMs: run.environment.timeoutMs ?? QUALITY_DEFAULT_TIMEOUT_MS });
+      if (!commandSucceeded(result)) throw new Error("Recovered validation service teardown failed.");
+    }
+    await this.repoMutex.run(project.repoPath, () => this.dependencies.system.cleanupValidationWorkspace({ ticketId, runId: run.id, repoPath: project.repoPath, commitSha: run.revision }));
+    this.update(run.id, { cleanupStatus: "complete" });
   }
 
   async shutdown(): Promise<void> {

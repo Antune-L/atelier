@@ -354,7 +354,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       const results = await Promise.allSettled([
         delegationManager.quiesceAutonomous(ticketId),
         sessionHub.closeAutonomous(ticketId),
-        qualityManager.cancel(ticketId, { pendingManual: false }),
+        qualityManager.cancel(ticketId, { pendingManual: false }).then(() => qualityManager.reconcileRetainedCleanup(ticketId)),
       ]);
       return results.every((result) => result.status === "fulfilled" && result.value !== false)
         && !delegationManager.hasAutonomousWriters(ticketId) && !qualityManager.hasAutonomousWriters(ticketId)

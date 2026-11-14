@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { z } from "zod";
 
+import { AutonomousExecutionError } from "../../shared/autonomous.ts";
 import { QUALITY_DEFAULT_TIMEOUT_MS } from "../../shared/quality.ts";
 import type { QualityPermissionBlockReason, QualityValidationMode } from "../../shared/quality.ts";
 import type { AgentImageInput, AgentExecutionGuard, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
@@ -177,119 +178,124 @@ export async function runQualitySession(options: QualitySessionOptions) {
     options.journal?.assertHealthy();
     if (options.signal.aborted || options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) throw new Error("Validation stopped before provider startup");
     startupAttempted = true;
-    handle = options.startSession({
-      ticketId: `${options.ticketId}-quality-${options.runId}`,
-      executionGuard: options.executionGuard,
-      slotId: QUALITY_SLOT_ID,
-      cwd: options.cwd,
-      environment: { ...options.environment, RIPGREP_CONFIG_PATH: undefined },
-      provider: options.execution.provider,
-      model: options.execution.model,
-      effort: options.execution.effort,
-      serviceTier: options.execution.serviceTier,
-      role: "quality-validator",
-      permissionMode: "dontAsk",
-      readOnly: true,
-      permissionAllow: options.mode === "repository" ? CODEX_VALIDATOR_READ_ALLOW : [],
-      allowedTools: ["Read", "Glob", "Grep", ...(options.allowedTools ?? [])],
-      disallowedTools: [...QUALITY_NATIVE_DENIED_TOOLS, ...(options.disallowedTools ?? [])],
-      skills: [],
-      disableWorkerTools: true,
-      extraMcpServers: options.extraMcpServers,
-      outputSchema: options.outputSchema,
-      onToolCall: async () => ({ ok: false, result: "Pipeline tools are unavailable during behavioral validation" }),
-      onEvent: (event) => {
-        if (settled) return;
-        try {
-          options.journal?.assertHealthy();
-          eventCounts[event.type] = (eventCounts[event.type] ?? 0) + 1;
-          lastEventType = event.type;
-          lastEventMs = Date.now() - startedAt;
-          if (event.type === "progress" && event.permissionDenial) {
-            permissionDenialCount += 1;
-            if (permissionDenials.length < QUALITY_DIAGNOSTIC_DENIAL_LIMIT) {
-              const denial = event.permissionDenial;
-              const toolName = denial.toolName.slice(0, QUALITY_DIAGNOSTIC_TOOL_NAME_LIMIT);
-              const commandShape = deniedCommandShape(denial.command);
-              permissionDenials.push({
-                provider: options.execution.provider, source: "provider_permission_denial",
-                toolName,
-                commandShape,
-                reason: qualityErrorMessage(mask(denial.reason)).slice(0, QUALITY_DIAGNOSTIC_PATH_LIMIT), reportedMs: lastEventMs,
-                blockReason: denial.blockReason,
-                signature: createHash("sha256").update(JSON.stringify([options.execution.provider, toolName, denial.blockReason, commandShape])).digest("hex").slice(0, QUALITY_DENIAL_SIGNATURE_LENGTH),
-                workspaceAvailable: existsSync(options.cwd),
-              });
-            }
-          }
-          if (event.type === "progress" && event.permissionDenial) {
-            const denial = event.permissionDenial;
-            const key = denial.nativeId ? `${event.sourceId ?? "main"}:${denial.nativeId}` : null;
-            if (key === null || !observedDenials.has(key)) {
-              const actionId = key === null ? null : nativeActions.get(key);
-              options.journal?.observe({ kind: "denial", status: "denied", phase, sessionId, provider: options.execution.provider, nativeId: denial.nativeId ?? null, sourceId: event.sourceId ?? null, toolName: denial.toolName, actionIds: actionId ? [actionId] : [], summary: `Observed permission denial: ${denial.blockReason ?? "unknown"}` });
-              if (key !== null) observedDenials.add(key);
-            }
-          }
-          if (event.type === "tool_use" && /browser_(?:type|fill_form|select_option)$/.test(event.name)) {
-            const input = z.object({ text: z.string().optional(), value: z.string().optional(), fields: z.array(z.object({ value: z.string() })).optional() }).safeParse(event.input);
-            if (input.success) for (const value of [input.data.text, input.data.value, ...(input.data.fields ?? []).map((field) => field.value)]) if (value) secrets.push(value);
-          }
-          options.journal?.assertHealthy();
-          options.onEvent?.(event);
-          if (event.type === "init") sessionId = event.sessionId;
-          if (event.type === "tool_use" && !event.toolCallId) options.journal?.observe({ kind: "tool", status: "unknown", phase, sessionId, provider: options.execution.provider, toolName: event.name, sourceId: event.sourceId ?? null, summary: "Native tool observed without a correlation identifier" });
-          if (event.type === "tool_use" && event.toolCallId) {
-            const key = `${event.sourceId ?? "main"}:${event.toolCallId}`;
-            if (nativeActions.has(key)) return;
-            const actionId = options.journal?.start({ kind: "tool", phase, nativeId: event.toolCallId, sourceId: event.sourceId ?? null, sessionId, provider: options.execution.provider, toolName: event.name, summary: "Native tool call observed; provider event timing does not guarantee capture before execution" }) ?? null;
+    try {
+      handle = options.startSession({
+        ticketId: `${options.ticketId}-quality-${options.runId}`,
+        executionGuard: options.executionGuard,
+        slotId: QUALITY_SLOT_ID,
+        cwd: options.cwd,
+        environment: { ...options.environment, RIPGREP_CONFIG_PATH: undefined },
+        provider: options.execution.provider,
+        model: options.execution.model,
+        effort: options.execution.effort,
+        serviceTier: options.execution.serviceTier,
+        role: "quality-validator",
+        permissionMode: "dontAsk",
+        readOnly: true,
+        permissionAllow: options.mode === "repository" ? CODEX_VALIDATOR_READ_ALLOW : [],
+        allowedTools: ["Read", "Glob", "Grep", ...(options.allowedTools ?? [])],
+        disallowedTools: [...QUALITY_NATIVE_DENIED_TOOLS, ...(options.disallowedTools ?? [])],
+        skills: [],
+        disableWorkerTools: true,
+        extraMcpServers: options.extraMcpServers,
+        outputSchema: options.outputSchema,
+        onToolCall: async () => ({ ok: false, result: "Pipeline tools are unavailable during behavioral validation" }),
+        onEvent: (event) => {
+          if (settled) return;
+          try {
             options.journal?.assertHealthy();
-            nativeActions.set(key, actionId);
-            pendingTools.set(key, { tool: event.name, input: event.input, actionId });
-            if (toolDiagnostics.length < QUALITY_DIAGNOSTIC_TOOL_LIMIT) {
-              const input = toolDiagnosticInputSchema.safeParse(event.input);
-              const path = input.success ? input.data.file_path ?? input.data.path : undefined;
-              const glob = input.success ? input.data.glob : undefined;
-              const pattern = input.success ? input.data.pattern : undefined;
-              toolDiagnostics.push({
-                toolCallId: event.toolCallId, tool: event.name, startedMs: lastEventMs, completedMs: null,
-                path: typeof path === "string" ? qualityErrorMessage(mask(path)).slice(0, QUALITY_DIAGNOSTIC_PATH_LIMIT) : null,
-                glob: typeof glob === "string" ? qualityErrorMessage(mask(glob)).slice(0, QUALITY_DIAGNOSTIC_PATH_LIMIT) : null,
-                patternLength: typeof pattern === "string" ? pattern.length : null, ok: null, outputLength: null,
-              });
-            }
-          }
-          if (event.type === "tool_result") {
-            const key = `${event.sourceId ?? "main"}:${event.toolCallId}`;
-            if (completedNativeActions.has(key)) return;
-            completedNativeActions.add(key);
-            const pending = pendingTools.get(key);
-            const rawOutput = pending ? toolOutputText(event.output) : "";
-            if (pending?.actionId) options.journal?.finish(pending.actionId, { status: event.ok ? "succeeded" : "failed", sessionId, truncated: rawOutput.length > QUALITY_OBSERVATION_LIMIT, summary: "Native tool result observed" });
-            else if (!nativeActions.has(key)) options.journal?.observe({ kind: "observation", phase, nativeId: event.toolCallId, sourceId: event.sourceId ?? null, sessionId, provider: options.execution.provider, status: "unknown", summary: "Native result observed without a matching start" });
-            if (pending) {
-              let output = rawOutput.slice(0, QUALITY_OBSERVATION_LIMIT);
-              if (rawOutput.length > QUALITY_OBSERVATION_LIMIT) output = output.slice(0, Math.max(0, output.lastIndexOf("\n")));
-              const redactedOutput = mask(rawOutput).slice(0, QUALITY_OBSERVATION_LIMIT);
-              observations.push({ toolCallId: event.toolCallId, ...pending, output, redactedOutput, truncated: rawOutput.length > QUALITY_OBSERVATION_LIMIT, ok: event.ok });
-              const diagnostic = toolDiagnostics.find((entry) => entry.toolCallId === event.toolCallId);
-              if (diagnostic) {
-                diagnostic.completedMs = lastEventMs;
-                diagnostic.ok = event.ok;
-                diagnostic.outputLength = output.length;
+            eventCounts[event.type] = (eventCounts[event.type] ?? 0) + 1;
+            lastEventType = event.type;
+            lastEventMs = Date.now() - startedAt;
+            if (event.type === "progress" && event.permissionDenial) {
+              permissionDenialCount += 1;
+              if (permissionDenials.length < QUALITY_DIAGNOSTIC_DENIAL_LIMIT) {
+                const denial = event.permissionDenial;
+                const toolName = denial.toolName.slice(0, QUALITY_DIAGNOSTIC_TOOL_NAME_LIMIT);
+                const commandShape = deniedCommandShape(denial.command);
+                permissionDenials.push({
+                  provider: options.execution.provider, source: "provider_permission_denial",
+                  toolName,
+                  commandShape,
+                  reason: qualityErrorMessage(mask(denial.reason)).slice(0, QUALITY_DIAGNOSTIC_PATH_LIMIT), reportedMs: lastEventMs,
+                  blockReason: denial.blockReason,
+                  signature: createHash("sha256").update(JSON.stringify([options.execution.provider, toolName, denial.blockReason, commandShape])).digest("hex").slice(0, QUALITY_DENIAL_SIGNATURE_LENGTH),
+                  workspaceAvailable: existsSync(options.cwd),
+                });
               }
-              pendingTools.delete(key);
             }
+            if (event.type === "progress" && event.permissionDenial) {
+              const denial = event.permissionDenial;
+              const key = denial.nativeId ? `${event.sourceId ?? "main"}:${denial.nativeId}` : null;
+              if (key === null || !observedDenials.has(key)) {
+                const actionId = key === null ? null : nativeActions.get(key);
+                options.journal?.observe({ kind: "denial", status: "denied", phase, sessionId, provider: options.execution.provider, nativeId: denial.nativeId ?? null, sourceId: event.sourceId ?? null, toolName: denial.toolName, actionIds: actionId ? [actionId] : [], summary: `Observed permission denial: ${denial.blockReason ?? "unknown"}` });
+                if (key !== null) observedDenials.add(key);
+              }
+            }
+            if (event.type === "tool_use" && /browser_(?:type|fill_form|select_option)$/.test(event.name)) {
+              const input = z.object({ text: z.string().optional(), value: z.string().optional(), fields: z.array(z.object({ value: z.string() })).optional() }).safeParse(event.input);
+              if (input.success) for (const value of [input.data.text, input.data.value, ...(input.data.fields ?? []).map((field) => field.value)]) if (value) secrets.push(value);
+            }
+            options.journal?.assertHealthy();
+            options.onEvent?.(event);
+            if (event.type === "init") sessionId = event.sessionId;
+            if (event.type === "tool_use" && !event.toolCallId) options.journal?.observe({ kind: "tool", status: "unknown", phase, sessionId, provider: options.execution.provider, toolName: event.name, sourceId: event.sourceId ?? null, summary: "Native tool observed without a correlation identifier" });
+            if (event.type === "tool_use" && event.toolCallId) {
+              const key = `${event.sourceId ?? "main"}:${event.toolCallId}`;
+              if (nativeActions.has(key)) return;
+              const actionId = options.journal?.start({ kind: "tool", phase, nativeId: event.toolCallId, sourceId: event.sourceId ?? null, sessionId, provider: options.execution.provider, toolName: event.name, summary: "Native tool call observed; provider event timing does not guarantee capture before execution" }) ?? null;
+              options.journal?.assertHealthy();
+              nativeActions.set(key, actionId);
+              pendingTools.set(key, { tool: event.name, input: event.input, actionId });
+              if (toolDiagnostics.length < QUALITY_DIAGNOSTIC_TOOL_LIMIT) {
+                const input = toolDiagnosticInputSchema.safeParse(event.input);
+                const path = input.success ? input.data.file_path ?? input.data.path : undefined;
+                const glob = input.success ? input.data.glob : undefined;
+                const pattern = input.success ? input.data.pattern : undefined;
+                toolDiagnostics.push({
+                  toolCallId: event.toolCallId, tool: event.name, startedMs: lastEventMs, completedMs: null,
+                  path: typeof path === "string" ? qualityErrorMessage(mask(path)).slice(0, QUALITY_DIAGNOSTIC_PATH_LIMIT) : null,
+                  glob: typeof glob === "string" ? qualityErrorMessage(mask(glob)).slice(0, QUALITY_DIAGNOSTIC_PATH_LIMIT) : null,
+                  patternLength: typeof pattern === "string" ? pattern.length : null, ok: null, outputLength: null,
+                });
+              }
+            }
+            if (event.type === "tool_result") {
+              const key = `${event.sourceId ?? "main"}:${event.toolCallId}`;
+              if (completedNativeActions.has(key)) return;
+              completedNativeActions.add(key);
+              const pending = pendingTools.get(key);
+              const rawOutput = pending ? toolOutputText(event.output) : "";
+              if (pending?.actionId) options.journal?.finish(pending.actionId, { status: event.ok ? "succeeded" : "failed", sessionId, truncated: rawOutput.length > QUALITY_OBSERVATION_LIMIT, summary: "Native tool result observed" });
+              else if (!nativeActions.has(key)) options.journal?.observe({ kind: "observation", phase, nativeId: event.toolCallId, sourceId: event.sourceId ?? null, sessionId, provider: options.execution.provider, status: "unknown", summary: "Native result observed without a matching start" });
+              if (pending) {
+                let output = rawOutput.slice(0, QUALITY_OBSERVATION_LIMIT);
+                if (rawOutput.length > QUALITY_OBSERVATION_LIMIT) output = output.slice(0, Math.max(0, output.lastIndexOf("\n")));
+                const redactedOutput = mask(rawOutput).slice(0, QUALITY_OBSERVATION_LIMIT);
+                observations.push({ toolCallId: event.toolCallId, ...pending, output, redactedOutput, truncated: rawOutput.length > QUALITY_OBSERVATION_LIMIT, ok: event.ok });
+                const diagnostic = toolDiagnostics.find((entry) => entry.toolCallId === event.toolCallId);
+                if (diagnostic) {
+                  diagnostic.completedMs = lastEventMs;
+                  diagnostic.ok = event.ok;
+                  diagnostic.outputLength = output.length;
+                }
+                pendingTools.delete(key);
+              }
+            }
+            options.journal?.assertHealthy();
+            if (event.type === "turn_end" || event.type === "error") settle(event);
+          } catch (error) {
+            journalFailure = error instanceof Error ? error : new Error("Quality history capture failed");
+            dispose();
+            settle({ type: "error", message: "Quality history capture failed; validation interrupted" });
           }
-          options.journal?.assertHealthy();
-          if (event.type === "turn_end" || event.type === "error") settle(event);
-        } catch (error) {
-          journalFailure = error instanceof Error ? error : new Error("Quality history capture failed");
-          dispose();
-          settle({ type: "error", message: "Quality history capture failed; validation interrupted" });
-        }
-      },
-    });
+        },
+      });
+    } catch (error) {
+      if (error instanceof AutonomousExecutionError) startupAttempted = false;
+      throw error;
+    }
     if (options.signal.aborted) onAbort();
     if (settled) dispose();
     else handle.send(options.prompt, undefined, options.images);

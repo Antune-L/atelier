@@ -344,7 +344,6 @@ export class SlotManager {
     const ticket = this.store.getTicket(ticketId);
     const state = ticket?.autonomousState;
     if (!state?.execution || !this.autonomousQuiesce) return false;
-    if (state.execution.closure.status === "unknown") return false;
     this.touch(this.store.updateTicket(ticketId, { autonomousState: {
       ...state,
       execution: { ...state.execution, closure: { ...state.execution.closure, status: "requested", requestedAt: state.execution.closure.requestedAt ?? Date.now() } },

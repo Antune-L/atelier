@@ -77,6 +77,12 @@ export class BranchPreviewError extends Error {
   }
 }
 
+function ownsOnlyPartialPr(ticket: Ticket): boolean {
+  if (!ticket.prUrl) return true;
+  const publication = ticket.autonomousState?.execution?.publication;
+  return publication !== undefined && (publication.prUrl === ticket.prUrl || publication.candidatePrUrl === ticket.prUrl);
+}
+
 export class PreviewManager {
   private readonly operations = new KeyedMutex();
   private readonly pending = new Map<string, Promise<void>>();
@@ -471,7 +477,7 @@ export class PreviewManager {
     return this.trackRequest(this.operations.run(`ticket:${ticketId}`, async () => {
       if (this.shuttingDown) throw new Error("Preview service is shutting down.");
       const ticket = this.deps.store.getTicket(ticketId);
-      if (!ticket?.autonomous || ticket.kind !== "feature" || ticket.branch !== branch || ticket.prUrl || !isProjectKey(ticket.project)) throw new Error("An active autonomous feature branch without a pull request is required.");
+      if (!ticket?.autonomous || ticket.kind !== "feature" || ticket.branch !== branch || !ownsOnlyPartialPr(ticket) || !isProjectKey(ticket.project)) throw new Error("An active autonomous feature branch without a pull request is required.");
       if (getProject(ticket.project).vcsProvider !== "github") throw new Error("Autonomous previews currently support GitHub projects only.");
       this.requireAutonomousDeployment(ticketId, expectedRevision);
       const previous = this.deps.store.getTicketPreview(ticketId);
@@ -490,7 +496,8 @@ export class PreviewManager {
       if (previous.cleanupStatus !== "complete" || previous.cleanupWatch) throw new Error("Stop and finish cleanup before redeploying this preview.");
       const replacement = this.list().find((preview) => preview.replacesPreviewId === id);
       if (replacement) return replacement;
-      if (previous.autonomous && previous.ticketId && !this.deps.store.getTicket(previous.ticketId)?.prUrl) return this.createAutonomous(previous.ticketId, previous.branch, previous.revision);
+      const owner = previous.ticketId ? this.deps.store.getTicket(previous.ticketId) : null;
+      if (previous.autonomous && previous.ticketId && owner && ownsOnlyPartialPr(owner)) return this.createAutonomous(previous.ticketId, previous.branch, previous.revision);
       if (previous.ticketId) return this.create(previous.ticketId);
       return this.launch(previous.project, { ticketId: null, prUrl: null, branch: previous.branch }, previous);
     }));

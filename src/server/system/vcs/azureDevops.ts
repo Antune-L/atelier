@@ -612,7 +612,7 @@ export class AzureDevopsVcsClient implements VcsClient {
     const expectedBody = fitAzurePrDescription(transform(body));
     if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) return { ok: false, reason: "Autonomous delivery deadline expired before description update." };
     opts.assertCurrent?.();
-    const res = await runBoundedCommand(this.prUpdateArgs(target, ["--description", expectedBody]), cwd, { timeoutMs: opts.deadlineAt === undefined ? BOUNDED_COMMAND_TIMEOUT_MS : Math.min(BOUNDED_COMMAND_TIMEOUT_MS, opts.deadlineAt - Date.now()) });
+    const res = await runBoundedCommand(this.prUpdateArgs(target, ["--description", expectedBody, ...(opts.title === undefined ? [] : ["--title", opts.title])]), cwd, { timeoutMs: opts.deadlineAt === undefined ? BOUNDED_COMMAND_TIMEOUT_MS : Math.min(BOUNDED_COMMAND_TIMEOUT_MS, opts.deadlineAt - Date.now()) });
     if (res.exitCode !== 0 || res.timedOut) return { ok: false, reason: `Pull request description update failed: ${boundedCommandDetail(res)}` };
     if (await this.readPrBody(cwd, prUrl) !== expectedBody) return { ok: false, reason: "Pull request description readback did not match the requested body." };
     return { ok: true, reason: "" };

@@ -26,30 +26,63 @@ export const testRelevanceResponseSchema = z.object({
   })).min(1),
 });
 
+const READ_LINE_PREFIX = /^\s*\d+\t/;
+const GREP_LINE_PREFIX = /^\d+[:-]/;
+const GREP_SEPARATOR = "--";
+
 export function attributedQualityCitation(citation: z.infer<typeof citationSchema>, observations: QualityObservation[], cwd: string): string | null {
   const local = relative(cwd, isAbsolute(citation.path) ? citation.path : join(cwd, citation.path));
   if (local === ".." || local.startsWith("../") || isAbsolute(local)) return null;
-  return observations.find((observation) => observation.ok
-    && ["Read", "Grep", "command_execution"].includes(observation.tool)
-    && (citation.toolCallId === undefined || observation.toolCallId === citation.toolCallId)
-    && readPathMatches(observation, citation.path, cwd)
-    && observation.output.includes(citation.excerpt))?.toolCallId ?? null;
+  const excerpt = collapseWhitespace(citation.excerpt);
+  return observations.find((observation) => {
+    if (!observation.ok || !["Read", "Grep", "command_execution"].includes(observation.tool)) return false;
+    if (citation.toolCallId !== undefined && observation.toolCallId !== citation.toolCallId) return false;
+    const text = observedFileText(observation, citation.path, cwd);
+    return text !== null && (text.includes(citation.excerpt) || collapseWhitespace(text).includes(excerpt));
+  })?.toolCallId ?? null;
 }
 
-function readPathMatches(observation: QualityObservation, path: string, cwd: string): boolean {
+function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function observedFileText(observation: QualityObservation, path: string, cwd: string): string | null {
   const input = z.object({ file_path: z.string().optional(), path: z.string().optional(), command: z.string().optional() }).safeParse(observation.input);
-  if (!input.success) return false;
+  if (!input.success) return null;
   const expected = resolve(cwd, path);
-  if (observation.tool === "Read") return input.data.file_path !== undefined && resolve(cwd, input.data.file_path) === expected;
-  if (observation.tool === "Grep") return input.data.path !== undefined && resolve(cwd, input.data.path) === expected;
-  if (!input.data.command) return false;
-  return matchesCodexBashAllowlist(input.data.command, ["Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)"], false, undefined, true, (words) => {
+  const lines = observation.output.split("\n");
+  if (observation.tool === "Read") {
+    if (input.data.file_path === undefined || resolve(cwd, input.data.file_path) !== expected) return null;
+    return lines.map((line) => line.replace(READ_LINE_PREFIX, "")).join("\n");
+  }
+  if (observation.tool === "Grep") return grepFileText(lines, input.data.path, expected, cwd);
+  if (!input.data.command) return null;
+  const direct = matchesCodexBashAllowlist(input.data.command, ["Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)"], false, undefined, true, (words) => {
     const command = words[0];
     const file = words.at(-1);
-    const direct = words.length === 2;
+    const single = words.length === 2;
     const bounded = (command === "head" || command === "tail") && words.length === 4 && words[1] === "-n" && /^\d+$/.test(words[2] ?? "");
-    return (direct || bounded) && file !== undefined && !file.startsWith("-") && resolve(cwd, file) === expected;
+    return (single || bounded) && file !== undefined && !file.startsWith("-") && resolve(cwd, file) === expected;
   });
+  return direct ? observation.output : null;
+}
+
+function grepFileText(lines: string[], searchPath: string | undefined, expected: string, cwd: string): string | null {
+  if (searchPath === undefined) return null;
+  const root = resolve(cwd, searchPath);
+  if (root === expected) return lines.filter((line) => line !== GREP_SEPARATOR).map((line) => line.replace(GREP_LINE_PREFIX, "")).join("\n");
+  const inside = relative(root, expected);
+  if (inside === "" || inside.startsWith("../") || isAbsolute(inside)) return null;
+  const prefixes = [expected, relative(cwd, expected), inside];
+  const matched = lines.flatMap((line) => {
+    const prefix = prefixes.find((candidate) => new RegExp(`^${escapeRegExp(candidate)}[:-]\\d+[:-]`).test(line));
+    return prefix ? [line.slice(prefix.length).replace(/^[:-]\d+[:-]/, "")] : [];
+  });
+  return matched.length > 0 ? matched.join("\n") : null;
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function assessTestRelevance(output: unknown, observations: QualityObservation[], cwd: string, provenance: { provider: QualitySessionOptions["execution"]["provider"]; sessionId: string; artifactPath: string; model?: string }, expectedCriteria: string[] = []): QualityVerificationComponent {

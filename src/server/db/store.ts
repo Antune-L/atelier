@@ -800,9 +800,9 @@ export class Store {
       if (execution.closure.status !== "confirmed") throw new Error("Previous writer closure must be confirmed before resuming execution");
       if (state.hostMutation !== null || state.deliveryConfirmation !== null) throw new Error("Reconcile host mutation or delivery confirmation before resuming execution");
       if (now >= execution.deadlineAt || execution.starts.length >= execution.maxStarts) throw new Error("No remaining execution allowance; an explicit additional allowance is required");
-      const next = autonomousStateSchema.parse({ ...state, phase: "planning", execution: {
+      const next = autonomousStateSchema.parse({ ...state, phase: "planning", environmentRetries: 0, execution: {
         ...execution, generation: execution.generation + 1,
-        workRevokedAt: null, revocationReason: null, userStopRequestedAt: null, finalizationStartedAt: null, finalizationDeadlineAt: null,
+        workRevokedAt: null, revocationReason: null, userStopRequestedAt: null, finalizationStartedAt: null, finalizationDeadlineAt: null, failureRepairs: [],
         maxPublicationAttempts: execution.publicationAttempts + (ticket.autonomousMaxPublicationAttempts ?? AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS),
         publication: {
           ...execution.publication,
@@ -852,12 +852,12 @@ export class Store {
       const deadlineAt = Math.max(now, execution.deadlineAt) + (grant.additionalMinutes ?? 0) * AUTONOMOUS_MINUTE_MS;
       if (deadlineAt <= now) throw new Error("The work grant must provide a future deadline");
       if (execution.starts.length >= execution.maxStarts + (grant.additionalStarts ?? 0)) throw new Error("The work grant must provide additional starts");
-      const next = autonomousStateSchema.parse({ ...state, phase: "planning", execution: {
+      const next = autonomousStateSchema.parse({ ...state, phase: "planning", environmentRetries: 0, execution: {
         ...execution, generation: execution.generation + 1,
         maxStarts: execution.maxStarts + (grant.additionalStarts ?? 0),
         maxCorrections: execution.maxCorrections + (grant.additionalCorrections ?? 0),
         deadlineAt,
-        workRevokedAt: null, revocationReason: null, userStopRequestedAt: null, finalizationStartedAt: null, finalizationDeadlineAt: null,
+        workRevokedAt: null, revocationReason: null, userStopRequestedAt: null, finalizationStartedAt: null, finalizationDeadlineAt: null, failureRepairs: [],
         maxPublicationAttempts: execution.publicationAttempts + (ticket.autonomousMaxPublicationAttempts ?? AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS),
         publication: {
           ...execution.publication,

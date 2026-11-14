@@ -85,6 +85,7 @@ export interface RecoveryCandidateOptions {
 }
 
 export interface PrMutationOptions {
+  title?: string;
   workspace?: { repoPath: string; branch: string; commitSha?: string };
   deadlineAt?: number;
   assertCurrent?: () => void;

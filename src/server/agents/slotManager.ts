@@ -1707,6 +1707,7 @@ export class SlotManager {
       const project = getProject(ticket.project);
       const baseBranch = resolvePrTargetBaseBranch(ticket, project, this.store);
       let prUrl = ticket.prUrl;
+      const existingPr = prUrl !== null;
       if (!prUrl) {
         const ready = await this.system.verifyStealthReady(path, ticket.branch);
         if (!ready.ok) return { ok: false, url: "", reason: ready.reason };
@@ -1729,6 +1730,10 @@ export class SlotManager {
       const current = this.store.getTicket(ticketId);
       if (!current) return { ok: false, url: prUrl, reason: "Autonomous ticket disappeared during delivery." };
       const identity = await this.verifyAutonomousPr(current, path, prUrl);
+      if (identity.ok && existingPr) {
+        const rewritten = await this.system.updatePrBody(path, prUrl, () => input.body, project.vcsProvider, { title: input.title, deadlineAt: current.autonomousState?.execution?.deadlineAt ?? current.autonomousState?.deadlineAt });
+        if (!rewritten.ok) return { ok: false, url: prUrl, reason: rewritten.reason };
+      }
       const reconciled = this.store.getTicket(ticketId)?.autonomousState;
       if (identity.ok && reconciled?.hostMutation?.kind === "create_pr") this.touch(this.store.updateTicket(ticketId, { autonomousState: { ...reconciled, hostMutation: null, ...(current.autonomousDelivery === "pr_only" ? { deliveryConfirmation: { prUrl, revision, outcome: "pr_only", confirmedAt: Date.now() } } : {}) } }));
       return { ok: identity.ok, url: prUrl, reason: identity.reason };

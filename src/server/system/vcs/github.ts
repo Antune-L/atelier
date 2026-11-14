@@ -643,7 +643,7 @@ export class GithubVcsClient implements VcsClient {
       await writeFile(bodyPath, expectedBody, { mode: 0o600 });
       if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) return { ok: false, reason: "Autonomous delivery deadline expired before description update." };
       opts.assertCurrent?.();
-      const res = await runGh([GH_BINARY, "pr", "edit", prUrl, "--body-file", bodyPath], cwd, { timeoutMs: opts.deadlineAt === undefined ? GH_MUTATION_TIMEOUT_MS : Math.min(GH_MUTATION_TIMEOUT_MS, opts.deadlineAt - Date.now()), verifyIdentity: true, deadlineAt: opts.deadlineAt, beforeRun: opts.assertCurrent });
+      const res = await runGh([GH_BINARY, "pr", "edit", prUrl, "--body-file", bodyPath, ...(opts.title === undefined ? [] : ["--title", opts.title])], cwd, { timeoutMs: opts.deadlineAt === undefined ? GH_MUTATION_TIMEOUT_MS : Math.min(GH_MUTATION_TIMEOUT_MS, opts.deadlineAt - Date.now()), verifyIdentity: true, deadlineAt: opts.deadlineAt, beforeRun: opts.assertCurrent });
       if (res.exitCode !== 0 || res.timedOut) return { ok: false, reason: ghFailure(res, "Pull request description update failed.") };
       if (await this.readPrBody(cwd, prUrl) !== expectedBody) return { ok: false, reason: "Pull request description readback did not match the requested body." };
       return { ok: true, reason: "" };

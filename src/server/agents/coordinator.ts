@@ -557,7 +557,7 @@ export class AgentCoordinator {
       const ticket = this.store.getTicket(ctx.ticketId);
       const state = ticket?.autonomousState;
       if (!ticket || !state || state.phase !== "delivering" || ticket.slotId !== ctx.slotId) return;
-      if (Date.now() >= state.deadlineAt && !state.deliveryConfirmation) {
+      if (Date.now() >= (state.execution?.deadlineAt ?? state.deadlineAt) && !state.deliveryConfirmation) {
         const reason = "Autonomous delivery timed out while waiting for native policies. The pull request and implementation worktree are retained.";
         this.hub.pushTicket(this.store.updateTicket(ctx.ticketId, { stage: "stalled", error: reason, autonomousState: { ...state, phase: "paused", error: reason } }));
         this.sessionHub.sendEvent(ctx.ticketId, { type: "nudge", message: reason });

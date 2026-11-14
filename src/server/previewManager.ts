@@ -697,7 +697,7 @@ export class PreviewManager {
   private autonomousDeploymentAllowed(ticketId: string, revision: string): boolean {
     const ticket = this.deps.store.getTicket(ticketId);
     const state = ticket?.autonomousState;
-    if (this.shuttingDown || !ticket?.autonomous || !state || !state.plan || state.deliveryConfirmation || state.revision !== revision || !["preview", "validating", "ready", "delivering"].includes(state.phase) || ["abandoned", "failed", "done", "merged"].includes(ticket.column) || Date.now() >= state.deadlineAt) return false;
+    if (this.shuttingDown || !ticket?.autonomous || !state || !state.plan || state.deliveryConfirmation || state.revision !== revision || !["preview", "validating", "ready", "delivering"].includes(state.phase) || ["abandoned", "failed", "done", "merged"].includes(ticket.column) || Date.now() >= (state.execution?.deadlineAt ?? state.deadlineAt)) return false;
     if (!autonomousPilotEnabled(getProject(ticket.project).vcsProvider)) return false;
     const slot = ticket.slotId === null ? null : this.deps.store.getSlot(ticket.slotId);
     return slot?.ticketId === ticketId;

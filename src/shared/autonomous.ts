@@ -20,10 +20,9 @@ export const AUTONOMOUS_MINUTE_MS = 60_000;
 export const autonomousMaxStartsSchema = z.number().int().positive().max(AUTONOMOUS_MAX_STARTS);
 export const autonomousFinalizationMinutesSchema = z.number().int().positive().max(AUTONOMOUS_MAX_FINALIZATION_MINUTES);
 export const autonomousMaxPublicationAttemptsSchema = z.number().int().positive().max(AUTONOMOUS_MAX_PUBLICATION_ATTEMPTS);
-const AUTONOMOUS_RESUME_TARGET_ACTIONS = ["verify", "fix"] as const;
 export const autonomousResumeTargetSchema = z.object({
   criterionId: z.string().trim().min(1),
-  action: z.enum(AUTONOMOUS_RESUME_TARGET_ACTIONS),
+  action: z.enum(["verify", "fix"]),
   observation: z.string().trim().min(1).max(QUALITY_MAX_OBSERVATION_LENGTH).optional(),
 });
 export type AutonomousResumeTarget = z.infer<typeof autonomousResumeTargetSchema>;

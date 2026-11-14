@@ -41,7 +41,7 @@ import type { AgentTurnUsage } from "../system/agentSession.ts";
 import { hasStructuredPrDescription, maxReviewLevel } from "../system/vcs/prDescription.ts";
 
 import type { AtelierManager } from "./atelierManager.ts";
-import { AUTONOMOUS_RESUME_PLANNING_PROMPT, AUTONOMOUS_RESUME_PROMPT, AUTONOMOUS_RESUME_WITHOUT_REVIEW_PROMPT, AUTONOMOUS_TARGET_EVIDENCE_STATUS, AUTONOMOUS_TARGET_NO_CORRECTION, AUTONOMOUS_TARGETS_UNAVAILABLE, autonomousTargetedResumePrompt, resolveAutonomousResumeTargets } from "./autonomousResumeTargets.ts";
+import { AUTONOMOUS_RESUME_PLANNING_PROMPT, AUTONOMOUS_RESUME_PROMPT, AUTONOMOUS_RESUME_WITHOUT_REVIEW_PROMPT, AUTONOMOUS_TARGET_EVIDENCE_STATUS, AUTONOMOUS_TARGET_LEGACY_RESUME_ONLY, AUTONOMOUS_TARGET_NO_ALLOWANCE, AUTONOMOUS_TARGET_NO_CORRECTION, AUTONOMOUS_TARGETS_UNAVAILABLE, autonomousTargetedResumePrompt, resolveAutonomousResumeTargets } from "./autonomousResumeTargets.ts";
 import type { AutonomousResumePlan } from "./autonomousResumeTargets.ts";
 import type { DelegationManager } from "./delegationManager.ts";
 import { isFirstFeatureDelivery } from "./prDescription.ts";
@@ -95,6 +95,7 @@ const NO_PROTOCOL_STALL_REASON = "tour terminé sans protocole";
 const REVIEW_GATE_REJECTED_EVENT = "review_gate_rejected";
 const AUTONOMOUS_DELIVERY_POLL_MS = 5_000;
 const AUTONOMOUS_RESUME_REQUESTED_EVENT = "autonomous_resume_requested";
+const LEGACY_AUTONOMOUS_RESUME_NOT_PAUSED = "Only a paused autonomous run without an unresolved host operation can be resumed.";
 const LEGACY_AUTONOMOUS_RESUME_UNREACHABLE = "The implementation session is unreachable. Relaunch the ticket before resuming its autonomous run.";
 const LEGACY_AUTONOMOUS_RESUME_REQUESTED = "The implementation session was asked to resume autonomous validation.";
 const AUTONOMOUS_RESUME_IN_PROGRESS = "Une reprise est déjà en cours pour cette carte.";
@@ -1286,11 +1287,16 @@ export class AgentCoordinator {
     return acceptsReviewLimit(ticket) && this.store.getImplementationPlan(ticket.id) === null;
   }
 
+  private autonomousMaxCorrections(ticket: Ticket, state: Ticket["autonomousState"]): number {
+    return state?.execution?.maxCorrections ?? ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS;
+  }
+
   private autonomousResumePrompt(ticket: Ticket, plan: AutonomousResumePlan | null): string {
     const withoutReview = this.autonomousResumeWithoutReview(ticket);
     if (plan === null) return withoutReview ? AUTONOMOUS_RESUME_WITHOUT_REVIEW_PROMPT : AUTONOMOUS_RESUME_PROMPT;
     const state = this.store.getTicket(ticket.id)?.autonomousState;
-    const correction = autonomousResumeConsumesCorrection({ targets: plan.targeted.map(({ target }) => target) }) && state ? { used: state.corrections, max: state.execution?.maxCorrections ?? ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS } : null;
+    const consumesCorrection = autonomousResumeConsumesCorrection({ targets: plan.targeted.map(({ target }) => target) });
+    const correction = consumesCorrection && state ? { used: state.corrections, max: this.autonomousMaxCorrections(ticket, state) } : null;
     return autonomousTargetedResumePrompt(plan, { withoutReview, correction });
   }
 
@@ -1304,11 +1310,21 @@ export class AgentCoordinator {
     } catch (error) {
       return { ok: false, result: getErrorMessage(error) };
     }
-    if (!resolved.ok || !autonomousResumeConsumesCorrection(input)) return resolved;
+    if (!resolved.ok) return resolved;
     const state = ticket.autonomousState;
-    const maxCorrections = state?.execution?.maxCorrections ?? ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS;
-    const granted = input.action === "extend" ? input.additionalCorrections ?? 0 : 0;
-    if ((state?.corrections ?? 0) >= maxCorrections + granted) return { ok: false, result: AUTONOMOUS_TARGET_NO_CORRECTION };
+    const execution = state?.execution;
+    const extending = input.action === "extend";
+    if (execution) {
+      const grantedMinutes = extending ? input.additionalMinutes ?? 0 : 0;
+      const grantedStarts = extending ? input.additionalStarts ?? 0 : 0;
+      const emptyGrant = extending && input.additionalMinutes === undefined && input.additionalStarts === undefined && input.additionalCorrections === undefined;
+      const deadlinePassed = Date.now() >= execution.deadlineAt && grantedMinutes === 0;
+      const startsExhausted = execution.starts.length >= execution.maxStarts + grantedStarts;
+      if (emptyGrant || deadlinePassed || startsExhausted) return { ok: false, result: AUTONOMOUS_TARGET_NO_ALLOWANCE };
+    }
+    if (!autonomousResumeConsumesCorrection(input)) return resolved;
+    const grantedCorrections = extending ? input.additionalCorrections ?? 0 : 0;
+    if ((state?.corrections ?? 0) >= this.autonomousMaxCorrections(ticket, state) + grantedCorrections) return { ok: false, result: AUTONOMOUS_TARGET_NO_CORRECTION };
     return resolved;
   }
 
@@ -1322,7 +1338,7 @@ export class AgentCoordinator {
 
   private async resumeLegacyAutonomous(ticket: Ticket, input: AutonomousResumeInput): Promise<ToolResult> {
     const state = ticket.autonomousState;
-    if (state?.phase !== "paused" || state.hostMutation) return { ok: false, result: "Only a paused autonomous run without an unresolved host operation can be resumed." };
+    if (state?.phase !== "paused" || state.hostMutation) return { ok: false, result: LEGACY_AUTONOMOUS_RESUME_NOT_PAUSED };
     if (input.targets === undefined) {
       if (!this.sessionHub.sendEvent(ticket.id, { type: "nudge", message: this.autonomousResumePrompt(ticket, null) })) return { ok: false, result: LEGACY_AUTONOMOUS_RESUME_UNREACHABLE };
       this.store.logEvent(ticket.id, AUTONOMOUS_RESUME_REQUESTED_EVENT, {});
@@ -1330,18 +1346,25 @@ export class AgentCoordinator {
     }
     const parsed = autonomousResumeSchema.safeParse(input);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
-    const targeting = await this.planAutonomousResumeTargets(ticket, parsed.data);
-    if (!targeting.ok) return targeting;
+    if (parsed.data.action !== "resume") return { ok: false, result: AUTONOMOUS_TARGET_LEGACY_RESUME_ONLY };
+    if (this.userRecoveryOperations.has(ticket.id)) return { ok: false, result: AUTONOMOUS_RESUME_IN_PROGRESS };
+    this.userRecoveryOperations.add(ticket.id);
     try {
+      const targeting = await this.planAutonomousResumeTargets(ticket, parsed.data);
+      if (!targeting.ok) return targeting;
       await this.recordAutonomousTargetObservations(ticket.id, targeting.plan);
+      const current = this.store.getTicket(ticket.id)?.autonomousState;
+      if (current?.phase !== "paused" || current.hostMutation) return { ok: false, result: LEGACY_AUTONOMOUS_RESUME_NOT_PAUSED };
+      const consumesCorrection = autonomousResumeConsumesCorrection(parsed.data);
+      if (consumesCorrection) this.store.updateTicket(ticket.id, { autonomousState: { ...current, corrections: current.corrections + 1 } });
+      if (!this.sessionHub.sendEvent(ticket.id, { type: "nudge", message: this.autonomousResumePrompt(ticket, targeting.plan) })) {
+        if (consumesCorrection) this.store.updateTicket(ticket.id, { autonomousState: current });
+        return { ok: false, result: LEGACY_AUTONOMOUS_RESUME_UNREACHABLE };
+      }
     } catch (error) {
       return { ok: false, result: getErrorMessage(error) };
-    }
-    const consumesCorrection = autonomousResumeConsumesCorrection(parsed.data);
-    if (consumesCorrection) this.store.updateTicket(ticket.id, { autonomousState: { ...state, corrections: state.corrections + 1 } });
-    if (!this.sessionHub.sendEvent(ticket.id, { type: "nudge", message: this.autonomousResumePrompt(ticket, targeting.plan) })) {
-      if (consumesCorrection) this.store.updateTicket(ticket.id, { autonomousState: state });
-      return { ok: false, result: LEGACY_AUTONOMOUS_RESUME_UNREACHABLE };
+    } finally {
+      this.userRecoveryOperations.delete(ticket.id);
     }
     this.store.logEvent(ticket.id, AUTONOMOUS_RESUME_REQUESTED_EVENT, { targets: parsed.data.targets });
     return { ok: true, result: LEGACY_AUTONOMOUS_RESUME_REQUESTED };

@@ -16,6 +16,8 @@ const TARGET_INSTRUCTIONS: Record<AutonomousResumeTarget["action"], string> = {
 export const AUTONOMOUS_TARGET_EVIDENCE_STATUS: Record<AutonomousResumeTarget["action"], QualityEvidence["status"]> = { verify: "inconclusive", fix: "failed" };
 
 export const AUTONOMOUS_TARGETS_UNAVAILABLE = "La validation est indisponible : la reprise ciblée par critère ne peut pas être préparée.";
+export const AUTONOMOUS_TARGET_NO_ALLOWANCE = "Les limites restantes ne couvrent pas cette reprise. Accordez des minutes ou des démarrages supplémentaires avant de continuer.";
+export const AUTONOMOUS_TARGET_LEGACY_RESUME_ONLY = "Ce parcours ne gère pas d’allocation supplémentaire : reprenez sans extension.";
 export const AUTONOMOUS_TARGET_NO_CORRECTION = "Aucune correction ne reste disponible pour corriger le code. Accordez au moins une correction supplémentaire ou choisissez de revérifier seulement.";
 
 export interface AutonomousResumePlan {

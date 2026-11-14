@@ -202,6 +202,10 @@ function targetedCorrections(grant: AutonomousResumeInput, corrections: number, 
   return corrections + 1;
 }
 
+function targetedReserves(grant: AutonomousResumeInput, reservedCriteria: string[]): string[] {
+  return grant.targets === undefined ? [] : reservedCriteria;
+}
+
 /** Attach the runtime-derived clickable addresses to a persisted worktree session row. */
 function enrichWorktreeSession(session: WorktreeSession): WorktreeSession {
   return { ...session, addresses: computeWorktreeAddresses(session.slotId, session.project) };
@@ -795,7 +799,7 @@ export class Store {
     });
   }
 
-  resumeAutonomousExecution(ticketId: string, input: AutonomousResumeInput = { action: "resume" }, now = Date.now()): AutonomousState {
+  resumeAutonomousExecution(ticketId: string, input: AutonomousResumeInput = { action: "resume" }, reservedCriteria: string[] = [], now = Date.now()): AutonomousState {
     const grant = autonomousResumeSchema.parse(input);
     return this.transaction(() => {
       const ticket = this.getTicket(ticketId);
@@ -810,6 +814,7 @@ export class Store {
       const next = autonomousStateSchema.parse({ ...state, phase: "planning", environmentRetries: 0, corrections: targetedCorrections(grant, state.corrections, execution.maxCorrections), execution: {
         ...execution, generation: execution.generation + 1,
         workRevokedAt: null, revocationReason: null, userStopRequestedAt: null, finalizationStartedAt: null, finalizationDeadlineAt: null, failureRepairs: [],
+        reservedCriteria: targetedReserves(grant, reservedCriteria),
         maxPublicationAttempts: execution.publicationAttempts + (ticket.autonomousMaxPublicationAttempts ?? AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS),
         publication: {
           ...execution.publication,
@@ -823,7 +828,7 @@ export class Store {
     });
   }
 
-  extendAutonomousExecution(ticketId: string, input: AutonomousResumeInput, now = Date.now()): AutonomousState | null {
+  extendAutonomousExecution(ticketId: string, input: AutonomousResumeInput, reservedCriteria: string[] = [], now = Date.now()): AutonomousState | null {
     const grant = autonomousResumeSchema.parse(input);
     return this.transaction(() => {
       const ticket = this.getTicket(ticketId);
@@ -842,6 +847,7 @@ export class Store {
           workRevokedAt: execution.workRevokedAt ?? now,
           revocationReason: "user_publication_requested",
           userStopRequestedAt: null,
+          reservedCriteria: [],
           publication: {
             ...execution.publication,
             status: execution.publication.candidatePrUrl !== null || execution.publication.prUrl !== null ? "candidate" : "none",
@@ -866,6 +872,7 @@ export class Store {
         maxCorrections,
         deadlineAt,
         workRevokedAt: null, revocationReason: null, userStopRequestedAt: null, finalizationStartedAt: null, finalizationDeadlineAt: null, failureRepairs: [],
+        reservedCriteria: targetedReserves(grant, reservedCriteria),
         maxPublicationAttempts: execution.publicationAttempts + (ticket.autonomousMaxPublicationAttempts ?? AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS),
         publication: {
           ...execution.publication,

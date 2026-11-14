@@ -1394,8 +1394,9 @@ export class AgentCoordinator {
         return { ok: true, result: "La réserve de publication explicitement accordée est ouverte. Le backend réconcilie la même PR en brouillon.", pending: true };
       }
       await this.recordAutonomousTargetObservations(ticketId, targeting.plan);
-      if (parsed.data.action === "extend") this.store.extendAutonomousExecution(ticketId, parsed.data);
-      else this.store.resumeAutonomousExecution(ticketId, parsed.data);
+      const reservedCriteria = targeting.plan?.reserves.map((criterion) => criterion.id) ?? [];
+      if (parsed.data.action === "extend") this.store.extendAutonomousExecution(ticketId, parsed.data, reservedCriteria);
+      else this.store.resumeAutonomousExecution(ticketId, parsed.data, reservedCriteria);
       const checkpoint = await this.autonomousWorkflow?.prepareResume?.(ticketId) ?? "validation";
       await this.slots.resumeAutonomousSession(ticketId);
       const prompt = checkpoint === "planning"

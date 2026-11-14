@@ -49,6 +49,8 @@ const SIMULATED_CHECKS_MESSAGE = "Une simulation ne peut pas détecter les comma
 const FULL_KINDS: Array<QualityValidationRun["kind"]> = ["full"];
 const TECHNICAL_KINDS: Array<QualityValidationRun["kind"]> = ["checks", "full"];
 const FUNCTIONAL_KINDS: Array<QualityValidationRun["kind"]> = ["functional"];
+export const QUALITY_CRITERIA_UNVERIFIED_ERROR = "Some required acceptance criteria were not independently verified.";
+export const QUALITY_SCENARIOS_UNVERIFIED_ERROR = "Some required functional scenarios were not verified in the browser.";
 const BROWSER_CONFIGURATION_MESSAGE = "Configure isolated services and an application start command before browser validation.";
 const FUNCTIONAL_STALLED_MESSAGE = "The same browser scenarios still fail after a functional correction; inspect the evidence or create a correction card.";
 const FUNCTIONAL_SOURCE_MISSING = "No completed real functional test with a failed required scenario is available for correction.";
@@ -1240,7 +1242,7 @@ export class QualityManager {
         let error: string | null = null;
         if (!technicalPassed) error = "One or more technical checks failed.";
         else if (result.mockupFidelityAccepted === false) error = "The original mockups were not accepted by a screenshot-attributed final comparison.";
-        else if (!behavioralPassed) error = functional ? "Some required functional scenarios were not verified in the browser." : "Some required acceptance criteria were not independently verified.";
+        else if (!behavioralPassed) error = functional ? QUALITY_SCENARIOS_UNVERIFIED_ERROR : QUALITY_CRITERIA_UNVERIFIED_ERROR;
         let failurePhase: QualityRunPhase | null = null;
         if (!technicalPassed) failurePhase = "checks";
         else if (!behavioralPassed) failurePhase = "validating";

@@ -96,6 +96,7 @@ export const autonomousExecutionSchema = z.object({
   maxEnvironmentRetries: z.number().int().nonnegative(),
   maxSameFailureRepairs: z.number().int().nonnegative(),
   failureRepairs: z.array(z.object({ fingerprint: z.string().min(1), count: z.number().int().nonnegative(), lastRunId: z.string().min(1) })).default([]),
+  reservedCriteria: z.array(z.string().min(1)).default([]),
   workRevokedAt: timestampSchema.nullable(),
   userStopRequestedAt: timestampSchema.nullable().default(null),
   revocationReason: z.string().nullable(),

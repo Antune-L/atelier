@@ -25,8 +25,18 @@ export interface AutonomousResumePlan {
   reserves: QualityCriterion[];
 }
 
-function criterionLabel(criterion: QualityCriterion): string {
+type CriterionReference = Pick<QualityCriterion, "id" | "text">;
+
+function criterionLabel(criterion: CriterionReference): string {
   return `${criterion.id} « ${criterion.text} »`;
+}
+
+export function autonomousReservedCriteriaInstruction(reserves: CriterionReference[]): string {
+  return `Critères laissés en réserve, ne travaille pas dessus : ${reserves.map(criterionLabel).join("; ")}.`;
+}
+
+export function autonomousReservedCriteriaPauseReason(reserves: CriterionReference[]): string {
+  return `Les critères ciblés par la reprise sont acceptés par la validation indépendante. Les critères laissés en réserve par l’utilisateur restent non vérifiés : ${reserves.map((criterion) => criterion.id).join(", ")}. La livraison reste une PR partielle.`;
 }
 
 export function resolveAutonomousResumeTargets(targets: AutonomousResumeTarget[], criteria: QualityCriterion[], gate: Pick<QualityGate, "requiredCriteria" | "verifiedCriteria">): { ok: true; plan: AutonomousResumePlan } | { ok: false; result: string } {
@@ -47,7 +57,7 @@ export function autonomousTargetedResumePrompt(plan: AutonomousResumePlan, optio
     lines.push(`- Critère ${criterionLabel(criterion)} : ${TARGET_INSTRUCTIONS[target.action]}`);
     if (target.observation !== undefined) lines.push(`  Observation de l’utilisateur : ${target.observation}`);
   }
-  if (plan.reserves.length > 0) lines.push(`Critères laissés en réserve, ne travaille pas dessus : ${plan.reserves.map(criterionLabel).join("; ")}.`);
+  if (plan.reserves.length > 0) lines.push(autonomousReservedCriteriaInstruction(plan.reserves));
   if (options.withoutReview) lines.push(WITHOUT_REVIEW_GUIDANCE);
   if (options.correction !== null) lines.push(`Correction ${options.correction.used}/${options.correction.max}.`);
   return lines.join("\n");

@@ -16,7 +16,9 @@ import { KeyedMutex } from "../mutex.ts";
 import type { PreviewManager } from "../previewManager.ts";
 import type { SystemAdapter } from "../system/types.ts";
 
+import { autonomousReservedCriteriaInstruction, autonomousReservedCriteriaPauseReason } from "./autonomousResumeTargets.ts";
 import { autonomousSourceDigest, captureAutonomousSources } from "./autonomousSourceCoverage.ts";
+import { QUALITY_CRITERIA_UNVERIFIED_ERROR, QUALITY_SCENARIOS_UNVERIFIED_ERROR } from "./qualityManager.ts";
 import type { QualityManager } from "./qualityManager.ts";
 
 const MINUTE_MS = 60_000;
@@ -35,6 +37,8 @@ const failureArtifactSchema = z.object({
   response: z.object({ results: z.array(z.object({ criterionId: z.string(), status: z.string(), summary: z.string(), output: z.string(), observedText: z.string(), tools: z.array(z.string()), checkEvidenceIds: z.array(z.string()).default([]) })) }).nullable(),
 });
 const AUTONOMOUS_RESUMED_STAGE: Stage = "testing";
+const CRITERIA_UNVERIFIED_ERRORS = [QUALITY_CRITERIA_UNVERIFIED_ERROR, QUALITY_SCENARIOS_UNVERIFIED_ERROR];
+const NO_RESERVED_CRITERIA: ReadonlySet<string> = new Set();
 const READY_MESSAGE = "Les vérifications locales et tous les cas E2E de la preview Coolify ont accepté le même commit. Appelle deliver_autonomous avec le titre et le corps de la PR. Le serveur appliquera le choix de livraison enregistré. Ne crée ni ne fusionne de PR avec une commande externe.";
 
 export interface AutonomousWorkflowDependencies {
@@ -356,21 +360,27 @@ export class AutonomousWorkflow {
     await this.deps.inject(ticketId, READY_MESSAGE);
   }
 
-  private accepted(ticket: Ticket, run: QualityValidationRun, functional: boolean): boolean {
+  private accepted(ticket: Ticket, run: QualityValidationRun, functional: boolean, reserved = NO_RESERVED_CRITERIA): boolean {
     this.requireFrozen(ticket);
     const state = this.state(ticket);
     const deferred = !functional && this.deferredToPreview(run);
-    if (run.simulated || (run.status !== "passed" && !deferred) || !run.evidenceAccepted || run.cleanupStatus !== "complete" || run.revision !== state.revision || run.provider !== ticket.orchestrator) return false;
+    const blockedByCriteriaOnly = reserved.size > 0 && this.criteriaUnverifiedOnly(run);
+    if (run.simulated || (run.status !== "passed" && !deferred && !blockedByCriteriaOnly) || !run.evidenceAccepted || run.cleanupStatus !== "complete" || run.revision !== state.revision || run.provider !== ticket.orchestrator) return false;
     if (functional ? run.kind !== "functional" || !run.preview || run.criteriaSnapshotId !== state.functionalSnapshotId : run.kind !== "full" || !run.technicalEvidenceAccepted || run.criteriaSnapshotId !== state.acceptanceSnapshotId) return false;
     const project = getProject(ticket.project);
     if (run.configFingerprint !== fingerprint([project.scripts ?? null, project.validation ?? null])) return false;
     const quality = this.deps.quality.get(ticket.id);
     return state.plan?.criteria.every((criterion) => {
+      if (reserved.has(criterion.id)) return true;
       const evidence = quality.evidence.filter((entry) => entry.runId === run.id && entry.criterionId === criterion.id && entry.authority === "agent").at(-1);
       if (!evidence) return false;
       const statusAccepted = evidence.status === "passed" || (deferred && evidence.status === "inconclusive");
       return statusAccepted && !evidence.timedOut && evidence.provider === run.provider && !!evidence.sessionId && (!functional || !!evidence.scenario);
     }) === true;
+  }
+
+  private criteriaUnverifiedOnly(run: QualityValidationRun): boolean {
+    return run.error !== null && CRITERIA_UNVERIFIED_ERRORS.includes(run.error);
   }
 
   private deferredToPreview(run: QualityValidationRun): boolean {
@@ -423,18 +433,26 @@ export class AutonomousWorkflow {
     const ticket = this.ticket(ticketId);
     const state = this.state(ticket);
     const maxCorrections = state.execution?.maxCorrections ?? ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS;
+    const reserved: ReadonlySet<string> = new Set(state.execution?.reservedCriteria ?? []);
+    const isReserved = (entry: QualityEvidence) => entry.criterionId !== null && reserved.has(entry.criterionId);
     const evidence = this.deps.quality.get(ticketId).evidence.filter((entry) => entry.runId === run.id);
-    const failedCriteria = evidence.filter((entry) => entry.authority === "agent" && entry.status === "failed" && entry.criterionId && entry.sessionId && entry.provider === run.provider && entry.output.trim().length > 0 && !entry.timedOut);
+    const failedCriteria = evidence.filter((entry) => entry.authority === "agent" && entry.status === "failed" && entry.criterionId && entry.sessionId && entry.provider === run.provider && entry.output.trim().length > 0 && !entry.timedOut && !isReserved(entry));
     const technicalFailure = run.technicalEvidenceAccepted && evidence.some((entry) => entry.status === "failed" && entry.authority === "server" && entry.kind === "command" && entry.exitCode !== null && entry.exitCode !== 0 && !entry.timedOut);
     const sourceFailure = state.sourceCoverage?.runId === run.id && state.sourceCoverage.correctable === true && !state.sourceCoverage.accepted;
+    const reservedFailureOnly = reserved.size > 0 && !technicalFailure && !sourceFailure && this.criteriaUnverifiedOnly(run) && !evidence.some((entry) => entry.status === "failed" && !isReserved(entry));
+    const reservedCriteria = state.plan?.criteria.filter((criterion) => reserved.has(criterion.id)) ?? [];
     const acceptedFailure = state.execution ? sourceFailure || run.evidenceAccepted || technicalFailure || failedCriteria.length > 0 : run.evidenceAccepted;
     const failureCategories = state.execution ? ["code_nonconformance", "backend_checks_failed", "validation_incomplete"] : ["code_nonconformance", "backend_checks_failed"];
     const failedStatus = run.status === "failed" || state.execution !== undefined && run.status === "inconclusive" && (technicalFailure || failedCriteria.length > 0);
-    const correctable = !run.simulated && failedStatus && run.cleanupStatus === "complete" && acceptedFailure && (!run.diagnostic || failureCategories.includes(run.diagnostic.category));
+    const correctable = !reservedFailureOnly && !run.simulated && failedStatus && run.cleanupStatus === "complete" && acceptedFailure && (!run.diagnostic || failureCategories.includes(run.diagnostic.category));
     const failureFingerprints = state.execution ? await this.defectFingerprints(state, run, failedCriteria) : [];
     const repeatedFailure = state.execution?.failureRepairs.find((entry) => failureFingerprints.includes(entry.fingerprint) && entry.count >= (state.execution?.maxSameFailureRepairs ?? 0));
     if (repeatedFailure) {
       await this.pause(ticketId, "The same independently observed criterion failure exhausted its repair allowance.");
+      return;
+    }
+    if (reservedFailureOnly && this.accepted(ticket, run, run.kind === "functional", reserved)) {
+      await this.pause(ticketId, autonomousReservedCriteriaPauseReason(reservedCriteria));
       return;
     }
     if (correctable && state.corrections < maxCorrections && Date.now() < this.workDeadline(state)) {
@@ -446,9 +464,10 @@ export class AutonomousWorkflow {
         this.deps.store.updateTicket(ticketId, { autonomousState: { ...current, execution: { ...current.execution, failureRepairs: [...history, ...repairs] } } });
       }
       this.patch(ticketId, { phase: "correcting", corrections: state.corrections + 1, fullRunId: null, previewRunId: null, error: run.error ? this.deps.preview.redactError(run.error) : null });
-      const observations = this.deps.quality.get(ticketId).evidence.filter((entry) => entry.runId === run.id && entry.status !== "passed").map((entry) => entry.criterionId ?? entry.summary);
+      const observations = this.deps.quality.get(ticketId).evidence.filter((entry) => entry.runId === run.id && entry.status !== "passed" && !isReserved(entry)).map((entry) => entry.criterionId ?? entry.summary);
       if (sourceFailure && state.sourceCoverage) observations.push(`Original-source audit: ${state.sourceCoverage.artifactPath}`);
-      await this.deps.inject(ticketId, this.deps.preview.redactError(`La validation indépendante ${run.id} a constaté un échec attribué. Distingue ses preuves des vérifications encore inconclusives, diagnostique la cause et corrige dans le même worktree, conserve le plan initial, relance la review indépendante, commit et push puis appelle validate_autonomous. N’ouvre pas de PR. Consulte les preuves du run pour le diagnostic. Cas concernés : ${observations.join("; ")}. Correction ${state.corrections + 1}/${maxCorrections}.`));
+      const reserves = reservedCriteria.length > 0 ? ` ${autonomousReservedCriteriaInstruction(reservedCriteria)}` : "";
+      await this.deps.inject(ticketId, this.deps.preview.redactError(`La validation indépendante ${run.id} a constaté un échec attribué. Distingue ses preuves des vérifications encore inconclusives, diagnostique la cause et corrige dans le même worktree, conserve le plan initial, relance la review indépendante, commit et push puis appelle validate_autonomous. N’ouvre pas de PR. Consulte les preuves du run pour le diagnostic. Cas concernés : ${observations.join("; ")}.${reserves} Correction ${state.corrections + 1}/${maxCorrections}.`));
       return;
     }
     if (this.environmentRetryable(run, state.execution !== undefined) && state.environmentRetries < (state.execution?.maxEnvironmentRetries ?? AUTONOMOUS_MAX_ENVIRONMENT_RETRIES) && Date.now() < this.workDeadline(state)) {

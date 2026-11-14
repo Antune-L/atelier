@@ -93,6 +93,7 @@ const REVIEW_GATE_REJECTED_EVENT = "review_gate_rejected";
 const AUTONOMOUS_DELIVERY_POLL_MS = 5_000;
 const AUTONOMOUS_RESUME_REQUESTED_EVENT = "autonomous_resume_requested";
 const AUTONOMOUS_RESUME_PROMPT = "Reprise demandée par l’utilisateur. Si le worktree est propre et poussé et que la dernière review indépendante couvre le code courant, appelle validate_autonomous puis termine ton tour. Sinon, termine d’abord la correction, la review, le commit et le push. N’ouvre ni ne fusionne de PR.";
+const AUTONOMOUS_RESUME_WITHOUT_REVIEW_PROMPT = "Reprise demandée par l’utilisateur. Ce ticket n’a pas de plan d’implémentation persistant (submit_implementation_plan n’a jamais été appelé ; le plan autonome figé ne compte pas) et sa livraison reste une PR relue par un humain. Si le budget de review est épuisé, ne relance pas les reviewers et n’appelle pas fail pour ce motif : le backend accepte le code modifié après la dernière passe et le signale dans la PR. Commit et pousse si nécessaire, puis appelle validate_autonomous et termine ton tour. N’ouvre ni ne fusionne de PR.";
 const PR_DESCRIPTION_REFUSED_EVENT = "pr_description_refused";
 const DELIVERY_DONE_EVENT = "done";
 const READY_FOR_REVIEW_EVENT = "ready_for_review";
@@ -1277,13 +1278,17 @@ export class AgentCoordinator {
     return "";
   }
 
+  private autonomousResumePrompt(ticket: Ticket): string {
+    return acceptsReviewLimit(ticket) && this.store.getImplementationPlan(ticket.id) === null ? AUTONOMOUS_RESUME_WITHOUT_REVIEW_PROMPT : AUTONOMOUS_RESUME_PROMPT;
+  }
+
   async resumeAutonomous(ticketId: string, input: AutonomousResumeInput = { action: "resume" }): Promise<ToolResult> {
     const ticket = this.store.getTicket(ticketId);
     const state = ticket?.autonomousState;
     if (!ticket?.autonomous || !state) return { ok: false, result: "Autonomous resume is unavailable for this ticket." };
     if (!state.execution) {
       if (state.phase !== "paused" || state.hostMutation) return { ok: false, result: "Only a paused autonomous run without an unresolved host operation can be resumed." };
-      if (!this.sessionHub.sendEvent(ticketId, { type: "nudge", message: AUTONOMOUS_RESUME_PROMPT })) return { ok: false, result: "The implementation session is unreachable. Relaunch the ticket before resuming its autonomous run." };
+      if (!this.sessionHub.sendEvent(ticketId, { type: "nudge", message: this.autonomousResumePrompt(ticket) })) return { ok: false, result: "The implementation session is unreachable. Relaunch the ticket before resuming its autonomous run." };
       this.store.logEvent(ticketId, AUTONOMOUS_RESUME_REQUESTED_EVENT, {});
       return { ok: true, result: "The implementation session was asked to resume autonomous validation." };
     }
@@ -1308,7 +1313,7 @@ export class AgentCoordinator {
       await this.slots.resumeAutonomousSession(ticketId);
       const prompt = checkpoint === "planning"
         ? "Reprise explicite avec l’enveloppe restante. Termine le plan autonome initial avant toute modification et conserve tous les travaux précédents."
-        : AUTONOMOUS_RESUME_PROMPT;
+        : this.autonomousResumePrompt(ticket);
       if (!this.sessionHub.sendEvent(ticketId, { type: "nudge", message: prompt })) throw new Error("La session de reprise est inaccessible.");
       this.store.logEvent(ticketId, AUTONOMOUS_RESUME_REQUESTED_EVENT, { ...parsed.data, checkpoint });
       return { ok: true, result: "La reprise est démarrée dans le slot conservé, avec la même PR et les crédits cumulés." };

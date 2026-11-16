@@ -66,6 +66,12 @@ async function listWorktreeRegistrations(repoPath: string, options: OperationDea
   return registrations;
 }
 
+async function findWorktreeRegistration(repoPath: string, path: string, options: OperationDeadlineOptions): Promise<WorktreeRegistration | undefined> {
+  const canonicalPath = await canonicalWorktreePath(path);
+  const registrations = await listWorktreeRegistrations(repoPath, options);
+  return registrations.find((entry) => resolve(entry.path) === canonicalPath || resolve(entry.path) === resolve(path));
+}
+
 export async function removeRegisteredWorktreesUnderRoot(repoPath: string, root: string, options: OperationDeadlineOptions = {}): Promise<void> {
   const canonicalRoot = await canonicalWorktreePath(root);
   for (const registration of await listWorktreeRegistrations(repoPath, options)) {
@@ -86,9 +92,7 @@ export async function removeDetachedWorktree(repoPath: string, path: string, opt
   assertOperationActive(options);
   const info = await worktreePathInfo(path);
   if (info?.isSymbolicLink()) throw new Error(`Nettoyage du lien symbolique ${path} refusé.`);
-  const canonicalPath = await canonicalWorktreePath(path);
-  const registrations = await listWorktreeRegistrations(repoPath, options);
-  const registration = registrations.find((entry) => resolve(entry.path) === canonicalPath || resolve(entry.path) === resolve(path));
+  const registration = await findWorktreeRegistration(repoPath, path, options);
   if (registration?.main) throw new Error(`Nettoyage du dépôt principal ${path} refusé.`);
   if (registration && registration.lockReason !== null && registration.lockReason !== ATELIER_WORKTREE_LOCK_REASON) {
     throw new Error(`Le worktree ${path} est verrouillé en dehors d'Atelier ; nettoyage refusé.`);
@@ -103,9 +107,12 @@ export async function removeDetachedWorktree(repoPath: string, path: string, opt
   const removed = await runBoundedCommand(args, repoPath, options);
   if (removed.timedOut) throw new DetachedWorktreeError("remove", removed);
   if (removed.exitCode === 0) return;
-  if (await worktreePathInfo(join(path, ".git"))) throw new DetachedWorktreeError("remove", removed);
+  // NOTE(ali): git drops the registration even when it fails to delete the directory, so a retried remove would fail.
+  const unregistered = !await findWorktreeRegistration(repoPath, registration.path, options);
+  if (!unregistered && await worktreePathInfo(join(path, ".git"))) throw new DetachedWorktreeError("remove", removed);
   assertOperationActive(options);
   await rm(path, { recursive: true, force: true });
+  if (unregistered) return;
   const retried = await runBoundedCommand(args, repoPath, options);
   if (retried.exitCode !== 0 || retried.timedOut) throw new DetachedWorktreeError("remove", retried);
 }

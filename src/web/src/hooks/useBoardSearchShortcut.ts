@@ -55,8 +55,8 @@ export function useBoardSearchShortcut(searchRef: RefObject<HTMLInputElement | n
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       const input = searchRef.current;
-      const search = { mounted: input !== null, behindModal: input !== null && isBehindModal(input) };
-      if (!input || !shouldFocusBoardSearch(event, focusedElementInfo(), search)) return;
+      if (!input) return;
+      if (!shouldFocusBoardSearch(event, focusedElementInfo(), { mounted: true, behindModal: isBehindModal(input) })) return;
       event.preventDefault();
       input.focus();
       input.select();

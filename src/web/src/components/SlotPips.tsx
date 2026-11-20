@@ -5,6 +5,14 @@ import { cn } from "@/lib/utils";
 
 interface SlotPipsProps {
   slots: Slot[];
+  onTicketOpen?: (ticketId: string) => void;
+}
+
+export interface SlotPipView {
+  ticketId: string | null;
+  disabled: boolean;
+  label: string;
+  title: string;
 }
 
 const STATUS_LABELS: Record<Slot["status"], string> = {
@@ -25,47 +33,42 @@ const STATUS_PIP_CLASSES: Record<Slot["status"], string> = {
 
 const ATTENTION_STATUSES: Slot["status"][] = ["stalled", "interrupted", "failed"];
 
-/** tmux session to attach to; busy slots expose `tmuxSession`, fall back to the ticket-derived name. */
-function sessionOf(slot: Slot): string | null {
-  if (slot.tmuxSession) return slot.tmuxSession;
-  if (slot.ticketId) return `ticket-${slot.ticketId}`;
-  return null;
+export function slotPipView(slot: Slot): SlotPipView {
+  const { ticketId } = slot;
+  const summary = `${slot.id} · ${STATUS_LABELS[slot.status]}${ticketId ? ` · Ouvrir la carte ${ticketId}` : ""}`;
+  return { ticketId, disabled: !ticketId, label: `Slot ${summary}`, title: `slot-${summary}` };
 }
 
-export function SlotPips({ slots }: SlotPipsProps) {
+export function openSlotTicket(slot: Slot, onTicketOpen?: (ticketId: string) => void): void {
+  const { ticketId } = slot;
+  if (!ticketId) return;
+  boardStore.openTicket(ticketId);
+  onTicketOpen?.(ticketId);
+}
+
+export function SlotPips({ slots, onTicketOpen }: SlotPipsProps) {
   const used = slots.filter((slot) => slot.status !== "free").length;
   const attention = slots.filter((slot) =>
     ATTENTION_STATUSES.includes(slot.status),
   ).length;
 
-  const copySession = (slot: Slot): void => {
-    const session = sessionOf(slot);
-    if (!session) return;
-    const command = `tmux attach -t ${session}`;
-    navigator.clipboard
-      .writeText(command)
-      .then(() => boardStore.notify("Commande copiée", command))
-      .catch(() => boardStore.notify("Copie impossible", command));
-  };
-
   return (
     <div role="group" aria-label="Places d’exécution" className="flex flex-wrap items-center gap-1.5">
       <div className="flex items-center gap-1">
         {slots.map((slot) => {
-          const session = sessionOf(slot);
-          const ticketSuffix = slot.ticketId ? ` · ${slot.ticketId}` : "";
+          const view = slotPipView(slot);
           return (
             <button
               key={slot.id}
               type="button"
-              disabled={!session}
-              onClick={() => copySession(slot)}
-              title={`slot-${slot.id} · ${STATUS_LABELS[slot.status]}${ticketSuffix}`}
-              aria-label={`Slot ${slot.id} · ${STATUS_LABELS[slot.status]}${ticketSuffix}${session ? " · Copier la commande de connexion" : ""}`}
+              disabled={view.disabled}
+              onClick={() => openSlotTicket(slot, onTicketOpen)}
+              title={view.title}
+              aria-label={view.label}
               className={cn(
                 "h-2 w-[18px] rounded-[1px] transition-opacity",
                 STATUS_PIP_CLASSES[slot.status],
-                session ? "hover:opacity-70" : "cursor-default",
+                view.disabled ? "cursor-default" : "hover:opacity-70",
               )}
             />
           );

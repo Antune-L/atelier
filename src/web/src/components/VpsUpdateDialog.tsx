@@ -5,6 +5,7 @@ import { vpsUpdateSchema } from "@shared/vpsUpdate";
 import type { VpsUpdateStatus } from "@shared/vpsUpdate";
 import type { ProviderVersions } from "@shared/providerUpdates";
 
+import { ApplicationVersionStatus } from "@/components/ApplicationVersionStatus";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
@@ -226,6 +227,7 @@ export function VpsUpdateDialog({ onClose, target, providers }: { onClose: () =>
       }
     >
       {confirmedTarget && <p className="text-sm">Version confirmée : <strong className="font-mono">{confirmedTarget}</strong>{confirmedProviders && <> · Claude {confirmedProviders.claude} · Codex {confirmedProviders.codex}</>}</p>}
+      {providerUpdates && <ApplicationVersionStatus updates={providerUpdates} available={confirmedTarget ?? null} />}
       {!confirmedTarget && <p role="status" className="text-sm">{targetError ?? providerUpdates?.message ?? "Vérification de la version à installer…"}</p>}
       {status === null && error === null && <p role="status" className="text-sm text-muted-foreground">Chargement de l’état de la mise à jour…</p>}
       {status !== null && (isRunning ? <RunningStatus status={status} reconnecting={connectionError !== null} /> : <FinishedStatus status={status} />)}

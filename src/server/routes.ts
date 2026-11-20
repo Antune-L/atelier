@@ -212,6 +212,8 @@ interface RouteDeps {
   repoRoot?: string;
   /** Tear down the server (not tmux) and relaunch the desktop app. Set only in dev desktop. */
   onRequestUpdate?: () => void;
+  installedRevision?: string | null;
+  installedDesktopVersion?: string | null;
   /** Native folder picker (desktop only); resolves to the picked path or null when cancelled. */
   pickFolder?: () => Promise<string | null>;
   projectPrs?: ProjectPrLister;
@@ -1090,7 +1092,8 @@ export function createApiRoutes(deps: RouteDeps) {
         available = !system.dryRun && host !== "browser" && hostReady;
       }
       const rows = await rowsPending;
-      return providerUpdatesSchema.parse({ simulated: system.dryRun, checkedAt: providerUpdates.lastCheckedAt, rows, host, target, available, message, maintenance: system.sourceUpdateAdmission.isUpdating });
+      const installed = (host === "mac" ? deps.installedDesktopVersion : deps.installedRevision) ?? null;
+      return providerUpdatesSchema.parse({ simulated: system.dryRun, checkedAt: providerUpdates.lastCheckedAt, rows, host, installed, target, available, message, maintenance: system.sourceUpdateAdmission.isUpdating });
     })
     .get("/desktop-update", async ({ query, request, set }) => {
       if (deps.system.dryRun) return jsonError(set, HTTP_CONFLICT, "Desktop updates are disabled in simulation.");

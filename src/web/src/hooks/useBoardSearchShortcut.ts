@@ -1,5 +1,7 @@
 import { useEffect, type RefObject } from "react";
 
+import { isTextEntryElement } from "@/lib/textEntry";
+
 export interface ShortcutKeyEvent {
   key: string;
   ctrlKey: boolean;
@@ -22,27 +24,20 @@ export interface BoardSearchState {
 }
 
 const SEARCH_SHORTCUT_KEY = "/";
-const EDITABLE_TAGS: ReadonlySet<string> = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 const MODAL_HIDDEN_SELECTOR = '[aria-hidden="true"]';
 const OPEN_MODAL_SELECTOR = '[aria-modal="true"]';
-
-function isEditable(focused: FocusedElementInfo | null): boolean {
-  if (!focused) return false;
-  return focused.isContentEditable || EDITABLE_TAGS.has(focused.tagName.toUpperCase());
-}
 
 export function shouldFocusBoardSearch(event: ShortcutKeyEvent, focused: FocusedElementInfo | null, search: BoardSearchState): boolean {
   if (event.key !== SEARCH_SHORTCUT_KEY) return false;
   if (event.ctrlKey || event.metaKey || event.altKey) return false;
   if (event.repeat || event.isComposing || event.defaultPrevented) return false;
   if (!search.mounted || search.behindModal) return false;
-  return !isEditable(focused);
+  return focused === null || !isTextEntryElement(focused);
 }
 
-function focusedElementInfo(): FocusedElementInfo | null {
+function focusedElement(): HTMLElement | null {
   const active = document.activeElement;
-  if (!(active instanceof HTMLElement)) return null;
-  return { tagName: active.tagName, isContentEditable: active.isContentEditable };
+  return active instanceof HTMLElement ? active : null;
 }
 
 function isBehindModal(input: HTMLInputElement): boolean {
@@ -56,7 +51,7 @@ export function useBoardSearchShortcut(searchRef: RefObject<HTMLInputElement | n
     const onKeyDown = (event: KeyboardEvent): void => {
       const input = searchRef.current;
       if (!input) return;
-      if (!shouldFocusBoardSearch(event, focusedElementInfo(), { mounted: true, behindModal: isBehindModal(input) })) return;
+      if (!shouldFocusBoardSearch(event, focusedElement(), { mounted: true, behindModal: isBehindModal(input) })) return;
       event.preventDefault();
       input.focus();
       input.select();

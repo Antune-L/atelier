@@ -37,6 +37,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useBoard } from "@/hooks/useBoard";
+import { useBoardSearchShortcut } from "@/hooks/useBoardSearchShortcut";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProjects, useProjectsLoaded } from "@/hooks/useProjects";
 import { useSuppressEscapeBeep } from "@/hooks/useSuppressEscapeBeep";
@@ -89,6 +90,8 @@ export function App() {
   const [vpsUpdateOpen, setVpsUpdateOpen] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationButtonRef = useRef<HTMLButtonElement>(null);
+  const boardSearchRef = useRef<HTMLInputElement>(null);
+  useBoardSearchShortcut(boardSearchRef);
   const [updating, setUpdating] = useState(false);
   const [atelierTarget, setAtelierTarget] = useState<AtelierTarget | null>(null);
   const [auditTarget, setAuditTarget] = useState<AuditTarget | null>(null);
@@ -331,6 +334,7 @@ export function App() {
             {view === "home" && (
               <div className="ml-auto flex max-w-full flex-wrap items-center gap-2">
                 <Input
+                  ref={boardSearchRef}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={homeView === "worktree" ? "Rechercher une session…" : "Rechercher…"}

@@ -21,7 +21,7 @@ import {
 import { getErrorMessage } from "../shared/errors.ts";
 import { terminalViewportSchema } from "../shared/schemas.ts";
 
-import { captureSourceRevision, createApplicationVersionReader } from "./applicationVersion.ts";
+import { captureSourceRevision, createApplicationVersionReader, installedDesktopVersion } from "./applicationVersion.ts";
 import { AtelierManager } from "./agents/atelierManager.ts";
 import { buildCampaignEngine, buildCampaignService } from "./campaign/wiring.ts";
 import { AutonomousWorkflow } from "./agents/autonomousWorkflow.ts";
@@ -533,6 +533,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     repoMutex,
     desktopUpdates: opts.desktopUpdates,
     onRequestUpdate: opts.onRequestUpdate,
+    installedRevision: BOOT_SOURCE_REVISION,
+    installedDesktopVersion: installedDesktopVersion(opts.desktopVersion),
     pickFolder: opts.onPickFolder,
   });
 

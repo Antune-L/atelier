@@ -29,6 +29,11 @@ export function captureSourceRevision(root: string): string | null {
   return null;
 }
 
+export function installedDesktopVersion(version: string | undefined): string | null {
+  const parsed = providerVersionSchema.safeParse(version);
+  return parsed.success && parsed.data !== PLACEHOLDER_VERSION ? parsed.data : null;
+}
+
 export function createApplicationVersionReader(options: {
   sourceRevision: string | null;
   desktopVersion?: string;
@@ -37,11 +42,7 @@ export function createApplicationVersionReader(options: {
   readCloudTarget?: () => Promise<AppUpdateTarget>;
 }): () => Promise<ApplicationVersion> {
   const desktop = options.desktopVersion !== undefined;
-  let installed = options.sourceRevision;
-  if (desktop) {
-    const parsed = providerVersionSchema.safeParse(options.desktopVersion);
-    installed = parsed.success && parsed.data !== PLACEHOLDER_VERSION ? parsed.data : null;
-  }
+  const installed = desktop ? installedDesktopVersion(options.desktopVersion) : options.sourceRevision;
   const base: ApplicationVersion = {
     installation: desktop ? "desktop" : "source",
     installed,

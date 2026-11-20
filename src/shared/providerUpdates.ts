@@ -24,6 +24,7 @@ export const providerUpdatesSchema = z.object({
     message: z.string().nullable(),
   })),
   host: z.enum(["source", "mac", "vps", "browser"]),
+  installed: z.string().max(128).nullable(),
   target: appUpdateTargetSchema.nullable(),
   available: z.boolean(),
   message: z.string().nullable(),

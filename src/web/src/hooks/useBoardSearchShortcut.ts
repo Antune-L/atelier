@@ -24,8 +24,6 @@ export interface BoardSearchState {
 }
 
 const SEARCH_SHORTCUT_KEY = "/";
-const MODAL_HIDDEN_SELECTOR = '[aria-hidden="true"]';
-const OPEN_MODAL_SELECTOR = '[aria-modal="true"]';
 
 export function shouldFocusBoardSearch(event: ShortcutKeyEvent, focused: FocusedElementInfo | null, search: BoardSearchState): boolean {
   if (event.key !== SEARCH_SHORTCUT_KEY) return false;
@@ -40,20 +38,23 @@ function focusedElement(): HTMLElement | null {
   return active instanceof HTMLElement ? active : null;
 }
 
-function isBehindModal(input: HTMLInputElement): boolean {
-  return input.closest(MODAL_HIDDEN_SELECTOR) !== null || document.querySelector(OPEN_MODAL_SELECTOR) !== null;
+function isCoveredByOverlay(input: HTMLInputElement): boolean {
+  const { left, top, width, height } = input.getBoundingClientRect();
+  const topmost = document.elementFromPoint(left + width / 2, top + height / 2);
+  return topmost === null || !input.contains(topmost);
 }
 
 export function useBoardSearchShortcut(searchRef: RefObject<HTMLInputElement | null>): void {
   // NOTE(ali): bubble phase and a check of defaultPrevented, so any surface that already handled the key wins.
-  // Radix modals hide the rest of the app with aria-hidden (hideOthers), which is how a hidden search is detected.
+  // The search counts as hidden when anything sits on top of it: Radix overlays, the fullscreen terminal, the update veil.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       const input = searchRef.current;
       if (!input) return;
-      if (!shouldFocusBoardSearch(event, focusedElement(), { mounted: true, behindModal: isBehindModal(input) })) return;
-      event.preventDefault();
+      if (!shouldFocusBoardSearch(event, focusedElement(), { mounted: true, behindModal: isCoveredByOverlay(input) })) return;
       input.focus();
+      if (document.activeElement !== input) return;
+      event.preventDefault();
       input.select();
     };
     window.addEventListener("keydown", onKeyDown);

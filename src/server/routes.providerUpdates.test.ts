@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { applicationUpdateVerdict, availableApplicationVersion } from "../shared/applicationUpdate.ts";
 import type { DesktopUpdateController, DesktopUpdateStatus } from "../shared/desktopUpdate.ts";
+import type { AdoptionStatus } from "../shared/providerAdoption.ts";
 import { providerUpdatesSchema } from "../shared/providerUpdates.ts";
 import { AgentCoordinator } from "./agents/coordinator.ts";
 import { AtelierManager } from "./agents/atelierManager.ts";
@@ -95,6 +96,24 @@ interface SetupOptions {
   installedRevision?: string | null;
   installedDesktopVersion?: string | null;
   sourceHost?: { onRequestUpdate: () => void };
+  readyCandidateVersion?: string;
+}
+
+const ADOPTION_META_KEY = "provider-adoption-v1";
+const HASH = "0".repeat(64);
+
+function readyAdoption(version: string): AdoptionStatus {
+  const requestId = crypto.randomUUID();
+  const evidence = { evidenceSha256: HASH, nativeHashes: { claude: HASH, codex: HASH } };
+  return {
+    requestId, providers: PROVIDERS, base: INSTALLED_REVISION, runId: 1, phase: "ready", reason: null, updatedAt: 0,
+    receipt: {
+      protocol: 1, requestId, runId: 1, base: INSTALLED_REVISION, revision: INSTALLED_REVISION, version, providers: PROVIDERS, lockSha256: HASH,
+      qualifications: { linux: evidence, mac: evidence },
+      gates: { linux: "passed", mac: "passed", static: "passed" },
+      artifacts: [{ name: `Atelier-v${version}-arm64.app.zip`, sha256: HASH }],
+    },
+  };
 }
 
 function setup(options: SetupOptions) {
@@ -109,6 +128,7 @@ function setup(options: SetupOptions) {
   const store = new Store(db);
   store.createProject(FIXTURE_PROJECT_KEY, { label: "Test", repoPath: "/tmp/repo", baseBranch: "main", commitTimeoutMs: 60_000, defaultAutoMerge: false, defaultAddScreenshots: false });
   initProjectRegistry(store);
+  if (options.readyCandidateVersion !== undefined) store.setMeta(ADOPTION_META_KEY, JSON.stringify(readyAdoption(options.readyCandidateVersion)));
   const hub = new ClientHub(store);
   const sessionHub = new SessionHub(system);
   const notifier = new Notifier(hub);
@@ -239,5 +259,24 @@ describe("F3-AC6 — showing the versions never installs, restarts or bypasses t
     const read = setup({ dryRun: true, sourceHost: { onRequestUpdate }, installedRevision: INSTALLED_REVISION });
     expect((await read()).installed).toBe(INSTALLED_REVISION);
     expect(onRequestUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("F3-AC3 — a provider-adoption candidate never masks a newer available version", () => {
+  const INSTALLED_CANDIDATE_VERSION = "0.1.5";
+
+  test("F3-AC3 — an already installed ready candidate leaves the host target in place", async () => {
+    const { controller } = spyDesktopUpdates();
+    const read = setup({ dryRun: false, desktopUpdates: controller, installedDesktopVersion: INSTALLED_CANDIDATE_VERSION, readyCandidateVersion: INSTALLED_CANDIDATE_VERSION });
+    const body = await read();
+    expect(availableApplicationVersion(body)).toBe(AVAILABLE_DESKTOP_VERSION);
+    expect(applicationUpdateVerdict({ host: body.host, simulated: body.simulated, installed: body.installed, available: availableApplicationVersion(body) }).state).toBe("update_available");
+  });
+
+  test("F3-AC3 — a ready candidate not yet installed is still the proposed target", async () => {
+    const { controller } = spyDesktopUpdates();
+    const read = setup({ dryRun: false, desktopUpdates: controller, installedDesktopVersion: INSTALLED_DESKTOP_VERSION, readyCandidateVersion: INSTALLED_CANDIDATE_VERSION });
+    const body = await read();
+    expect(availableApplicationVersion(body)).toBe(INSTALLED_CANDIDATE_VERSION);
   });
 });

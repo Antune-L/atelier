@@ -976,6 +976,7 @@ export function createApiRoutes(deps: RouteDeps) {
   const updateMutex = deps.repoMutex ?? new KeyedMutex();
   const providerUpdates = new ProviderUpdateService();
   const adoption = new ProviderAdoptionService(store, deps.system, deps.resourcesRoot ?? deps.projectRoot);
+  let installedRevision = deps.installedRevision ?? null;
   let releaseVpsMaintenance: (() => void) | null = null;
   let vpsMaintenanceAttempt: string | null = null;
 
@@ -1083,16 +1084,16 @@ export function createApiRoutes(deps: RouteDeps) {
         }
       } catch { message = "Cible de l'application indisponible. Vérifiez l'accès à la source ou au service de mise à jour ; aucune version compatible ne peut être confirmée."; }
       if (system.dryRun) { available = false; message = "Simulation : aucune installation ni consultation du registre."; }
+      const installed = host === "mac" ? deps.installedDesktopVersion ?? null : installedRevision;
       const candidate = adoption.snapshot();
-      if (candidate?.phase === "ready" && candidate.receipt) {
-        const receipt = candidate.receipt;
-        const candidateId = host === "mac" ? receipt.version : receipt.revision;
+      const receipt = candidate?.phase === "ready" ? candidate.receipt : null;
+      const candidateId = host === "mac" ? receipt?.version : receipt?.revision;
+      if (receipt && candidateId !== undefined && candidateId !== installed) {
         const hostReady = host === "source" || (available && target?.id === candidateId);
         target = { id: candidateId, version: receipt.version, providers: receipt.providers };
         available = !system.dryRun && host !== "browser" && hostReady;
       }
       const rows = await rowsPending;
-      const installed = (host === "mac" ? deps.installedDesktopVersion : deps.installedRevision) ?? null;
       return providerUpdatesSchema.parse({ simulated: system.dryRun, checkedAt: providerUpdates.lastCheckedAt, rows, host, installed, target, available, message, maintenance: system.sourceUpdateAdmission.isUpdating });
     })
     .get("/desktop-update", async ({ query, request, set }) => {
@@ -2344,6 +2345,8 @@ export function createApiRoutes(deps: RouteDeps) {
           if (frontendOnly) {
             system.sourceUpdateAdmission.completeSourceRecovery();
             mutationStarted = false;
+            const reloaded = await system.runProjectScript(repoRoot, "git rev-parse HEAD", GIT_QUERY_TIMEOUT_MS);
+            if (reloaded.ok) installedRevision = reloaded.output.trim();
             log.info("mise à jour frontend-only validée, soft-reload", { repoRoot, branch });
             return { ok: true, mode };
           }

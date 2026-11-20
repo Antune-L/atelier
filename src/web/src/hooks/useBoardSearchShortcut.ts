@@ -51,7 +51,7 @@ export function useBoardSearchShortcut(searchRef: RefObject<HTMLInputElement | n
     const onKeyDown = (event: KeyboardEvent): void => {
       const input = searchRef.current;
       if (!input) return;
-      if (!shouldFocusBoardSearch(event, focusedElement(), { mounted: true, behindModal: isCoveredByOverlay(input) })) return;
+      if (!shouldFocusBoardSearch(event, focusedElement(), { mounted: true, behindModal: false }) || isCoveredByOverlay(input)) return;
       input.focus();
       if (document.activeElement !== input) return;
       event.preventDefault();

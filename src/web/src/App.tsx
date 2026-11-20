@@ -292,7 +292,7 @@ export function App() {
           />
           <div className="space-y-3 border-t border-border p-4">
             {projectFilterSelect}
-            <SlotPips slots={slots} />
+            <SlotPips slots={slots} onTicketOpen={() => setNavigationOpen(false)} />
             <HostMetricsBadge />
           </div>
         </div>

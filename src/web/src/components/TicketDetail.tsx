@@ -28,6 +28,7 @@ import { api } from "@/lib/api";
 import { stageLabel, stageSteps, ticketCardState, type CardState } from "@/lib/display";
 import { canRecoverImplementation, IMPLEMENTATION_RECOVERY_REQUIRED_MESSAGE, needsImplementationRecovery } from "@/lib/implementationRecovery";
 import { boardStore } from "@/lib/store";
+import { isTextEntryElement } from "@/lib/textEntry";
 import { cn } from "@/lib/utils";
 
 /** Per-ticket tab selection, kept for the session only (deliberately not persisted). */
@@ -51,8 +52,6 @@ const STATE_TOKEN_COLORS: Record<CardState, string> = {
 
 const NAV_BUTTON_CLASSES =
   "rounded-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
-
-const TEXT_ENTRY_TAGS = ["INPUT", "TEXTAREA", "SELECT"];
 
 /**
  * Union comments by id (incoming wins) and keep them chronological. Shared by the initial fetch
@@ -106,7 +105,7 @@ function initialTab(ticket: Ticket): TicketTab {
 
 function isTextEntry(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  return TEXT_ENTRY_TAGS.includes(target.tagName) || target.isContentEditable;
+  return isTextEntryElement(target);
 }
 
 export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin, onOpenAuditOrigin }: TicketDetailProps) {

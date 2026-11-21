@@ -5,6 +5,7 @@ import { desktopUpdateStatusSchema } from "@shared/desktopUpdate";
 import type { DesktopUpdateStatus } from "@shared/desktopUpdate";
 import type { ProviderVersions } from "@shared/providerUpdates";
 
+import { ApplicationVersionStatus } from "@/components/ApplicationVersionStatus";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ProviderLogo } from "@/components/usage/ProviderLogo";
@@ -70,6 +71,7 @@ export function ProviderUpdates() {
           <RefreshCw className={`h-4 w-4 ${loading ? "motion-safe:animate-spin" : ""}`} aria-hidden />
         </button>
       </div>
+      {data && <ApplicationVersionStatus updates={data} />}
       <div className="divide-y rounded-md border">
         {PROVIDER_KEYS.map((provider) => {
           const row = rows.find((entry) => entry.provider === provider);

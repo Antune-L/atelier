@@ -94,6 +94,9 @@ const LOGS_SUBPATH = "logs";
 const DB_FILENAME = "kanban.db";
 const CONFIG_FILENAME = "config.json";
 
+export const EXTERNAL_VALIDATIONS_DIRNAME = "external-validations";
+const DEFAULT_EXTERNAL_VALIDATION_ROOT = join(homedir(), ".local", "share", "atelier", EXTERNAL_VALIDATIONS_DIRNAME);
+
 /**
  * An explicit `dataRoot` (desktop, tests) wins over the env override: a test server booted on a
  * temp dir must never reopen the live desktop database inherited through KANBAN_DB/KANBAN_CONFIG.
@@ -125,6 +128,7 @@ export interface StartServerOptions {
   resourcesRoot?: string;
   /** Writable data: kanban.db, uploads/, config.json, slots/ (default: repo root). */
   dataRoot?: string;
+  externalValidationRoot?: string;
   /** Native OS notification sink (desktop app only; WKWebView has no web Notification API). */
   onNotify?: (title: string, body: string) => void;
   /** Real checkout root for the in-app self-update git guards + rebuild (desktop dev only). */
@@ -446,7 +450,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     onChange: () => campaignEngine.wake(),
   });
   const campaignEngine = buildCampaignEngine({ store, system, slots: slotManager, lifecycle, notifier, service: campaignService, sessionHub, quota: (provider) => quotaService.read(provider), previews: previewManager, dryRun: system.dryRun, dataRoot });
-  const externalValidation = new ExternalValidationManager(join(homedir(), ".local", "share", "atelier", "external-validations", externalRootHash("sha256").update(resolve(dbPath)).digest("hex").slice(0, 16)), previewManager, previewConfig, system);
+  const externalValidationRoot = opts.externalValidationRoot ?? DEFAULT_EXTERNAL_VALIDATION_ROOT;
+  const externalValidation = new ExternalValidationManager(join(externalValidationRoot, externalRootHash("sha256").update(resolve(dbPath)).digest("hex").slice(0, 16)), previewManager, previewConfig, system);
   const configuredMcpToken = opts.mcpToken === undefined ? process.env.KANBAN_MCP_TOKEN : opts.mcpToken;
   const mcpToken = configuredMcpToken?.trim() || null;
   const publicMcpManager = mcpToken === null

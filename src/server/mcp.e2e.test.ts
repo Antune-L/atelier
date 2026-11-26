@@ -13,7 +13,7 @@ import { openPrSchema, ticketSchema, wsClientEventSchema } from "../shared/schem
 
 import { CAMPAIGN_TOOL_NAMES } from "./campaign/campaignMcpTools.ts";
 import { makeCampaignPlan } from "./testing/campaignFixtures.ts";
-import { startServer } from "./index.ts";
+import { EXTERNAL_VALIDATIONS_DIRNAME, startServer } from "./index.ts";
 import type { RunningServer } from "./index.ts";
 
 const MCP_TOKEN = "e2e-local-token";
@@ -255,7 +255,7 @@ beforeAll(async () => {
       },
     },
   }));
-  runningServer = await startServer({ dataRoot, port: 0, mcpToken: MCP_TOKEN });
+  runningServer = await startServer({ dataRoot, externalValidationRoot: join(dataRoot, EXTERNAL_VALIDATIONS_DIRNAME), port: 0, mcpToken: MCP_TOKEN });
   baseUrl = `http://127.0.0.1:${runningServer.port}`;
   client = new Client({ name: "atelier-e2e", version: "1.0.0" });
   transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {
@@ -1176,7 +1176,7 @@ test("the public MCP endpoint rejects invalid access and stays absent when disab
 
   await Bun.sleep(BACKGROUND_TASK_SETTLE_MS);
   const disabledRoot = await mkdtemp(join(tmpdir(), "kanban-mcp-disabled-"));
-  const disabledServer = await startServer({ dataRoot: disabledRoot, port: 0, mcpToken: null });
+  const disabledServer = await startServer({ dataRoot: disabledRoot, externalValidationRoot: join(disabledRoot, EXTERNAL_VALIDATIONS_DIRNAME), port: 0, mcpToken: null });
   try {
     const response = await fetch(`http://127.0.0.1:${disabledServer.port}/mcp`, { method: "POST" });
     expect(response.status).toBe(404);

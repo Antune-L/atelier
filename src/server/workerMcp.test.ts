@@ -4,8 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { createLogger, initLogFile } from "./logger.ts";
 import { WorkerMcpManager } from "./workerMcp.ts";
+
+const LOGGER_MODULE_PATH = join(import.meta.dir, "logger.ts");
+
+const fallbackResultSchema = z.object({ path: z.string().nullable() });
 
 const rpcResponseSchema = z.object({
   result: z
@@ -88,8 +91,16 @@ test("le logger retombe sur la console seule quand le dossier de logs est inutil
   const blocker = join(tmpdir(), `kanban-log-blocker-${Date.now()}`);
   await Bun.write(blocker, "not a directory");
   try {
-    expect(initLogFile(join(blocker, "logs"))).toBeNull();
-    expect(() => createLogger("test-fallback").info("toujours vivant")).not.toThrow();
+    const script = [
+      `const { createLogger, initLogFile } = await import(${JSON.stringify(LOGGER_MODULE_PATH)});`,
+      `const path = initLogFile(${JSON.stringify(join(blocker, "logs"))});`,
+      `createLogger("test-fallback").info("toujours vivant");`,
+      `console.log(JSON.stringify({ path }));`,
+    ].join("\n");
+    const child = Bun.spawnSync([process.execPath, "-e", script]);
+    expect(child.exitCode).toBe(0);
+    const lastLine = child.stdout.toString().trim().split("\n").at(-1) ?? "";
+    expect(fallbackResultSchema.parse(JSON.parse(lastLine)).path).toBeNull();
   } finally {
     rmSync(blocker, { force: true });
   }
